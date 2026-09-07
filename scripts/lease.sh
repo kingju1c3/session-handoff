@@ -1,26 +1,23 @@
 #!/bin/sh
 # session-handoff — ownership lease + append-only journal.
 #
-# Shared, unmodified logic with terminal-handoff's lease.sh: this file has
-# zero platform dependency (pure POSIX sh + python3, mkdir-based locking),
-# so it is copied rather than referenced across both handoff skills.
+# Pure POSIX sh + python3, mkdir-based locking (POSIX guarantees mkdir is
+# atomic; flock does not exist everywhere). No platform dependency at all.
 #
 # The lease is what makes a handoff an ownership TRANSFER rather than a
 # polite suggestion. Exactly one session owns the mission at a time; every
 # other session must refuse to do mission work. It lives on disk so it
 # survives a crash.
 #
-# LIVENESS DIFFERS FROM terminal-handoff'S VERSION: that one checks a local
-# PID with `kill -0`. A Claude Code Remote session has no local PID to
-# check — its liveness is a server fact (session_status/connection_status
-# from the get_session tool), which only the calling MODEL can query (a
-# shell script cannot call an MCP tool). So `recover` here does NOT try to
-# determine liveness itself the way the PID-based version does: the model
-# must call get_session on the recorded owner FIRST and only invoke
-# `recover` once it has confirmed, from that tool result, that the owner
-# is not RUNNING/connected. `ownerPid` is still recorded (best-effort,
-# often 0 for a remote session) for audit/debugging, not as the liveness
-# check.
+# LIVENESS IS NOT CHECKED HERE, DELIBERATELY. A session on these surfaces
+# has no local PID to test with `kill -0` — its liveness is a server fact
+# (session_status / connection_status from the get_session tool), which
+# only the calling MODEL can query, since a shell script cannot call an
+# MCP tool. So `recover` does NOT try to determine liveness itself: the
+# model must call get_session on the recorded owner FIRST and only invoke
+# `recover` once it has confirmed from that result that the owner is not
+# running. `ownerPid` is still recorded (best-effort, usually 0) for audit
+# and debugging, never as a liveness check.
 #
 # SESSION LABELS: every session in a chain has a label "<generation>.<fork>".
 # The root is 1.1. Its successor is 2.1, then 3.1 — generation is depth down

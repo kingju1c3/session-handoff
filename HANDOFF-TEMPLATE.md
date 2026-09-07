@@ -1,5 +1,5 @@
 # PROJECT CONTINUATION DOCUMENT
-## {{DATE}} {{TIME}} {{TZ}} · chain {{CHAIN_SHORT}} · generation {{GEN}} of {{CAP}}
+## {{DATE}} {{TIME}} {{TZ}} · chain {{CHAIN_SHORT}} · session {{LABEL}} (generation {{GEN}} of {{CAP}})
 
 > **AUTHORITY NOTE — read first.** This is a session snapshot, NOT an authority.
 > {{AUTHORITY_FILE}} is the source of truth and **wins over this file** wherever they
@@ -106,7 +106,8 @@ re-verified. ❓ LOW: assumed or inferred — **the next agent must verify befor
 - **Subagents/background tasks at handoff:** {{CHILDREN_STATUS}} (completed / cancelled mid-work)
 
 ### 10. HANDOFF CHAIN
-- Chain `{{CHAIN_ID}}`, generation **{{GEN}} of {{CAP}}**
+- Chain `{{CHAIN_ID}}`, this session **{{LABEL}}** (generation {{GEN}} of {{CAP}})
+- Lineage so far: {{LINEAGE}}  <!-- e.g. 1.1 → 2.1 → 2.2 -->
 - Prior sessions: {{ANCESTRY}}
 - Prior documents: {{PRIOR_DOCS}}
 
