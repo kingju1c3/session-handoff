@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { run, resumePrompt } from '../session-handoff.mjs';
+import { run, resumePrompt, continuationBundle } from '../session-handoff.mjs';
 
 const NOW = 1800000000000; // Synthetic deterministic host-clock fixture.
 const mission = 'Keep this exact mission.\n  Preserve spacing and café.';
@@ -16,9 +16,11 @@ const arm = (extra = {}) => run({ state: null, expectedRevision: 0, op: 'arm', s
 const step = (state, op, extra = {}) => run({ state, expectedRevision: state.revision, sessionId: state.owner,
   now: NOW, maxAgeMs: 60000, op, ...extra });
 async function checkpoint(extra = {}) {
-  let state = await arm(extra);
+  const { continuation, ...armOptions } = extra;
+  let state = await arm(armOptions);
   state = (await step(state, 'wind_down', { reason: 'explicit checkpoint' })).state;
-  state = (await step(state, 'checkpoint', { body: 'Full checkpoint with exact next action and evidence.', snapshot })).state;
+  state = (await step(state, 'checkpoint', { body: 'Full checkpoint with exact next action and evidence.', snapshot,
+    ...(continuation === undefined ? {} : { continuation }) })).state;
   return state;
 }
 async function durable(extra = {}) {
@@ -28,6 +30,14 @@ async function durable(extra = {}) {
 }
 const reserve = (state, extra = {}) => step(state, 'reserve', { mode: 'new', nonce: '1'.repeat(32), snapshot,
   writersQuiesced: true, reviewSkipReason: 'Synthetic fixture: reviewer unavailable.', ...extra }).then(r => r.state);
+const continuation = {
+  nextActions: [{ id: 'inspect-tracker', action: 'Read the governing tracker.', reason: 'Confirm the unfinished scope before edits.' },
+    { id: 'fix-parser', action: 'Fix the verified parser defect after takeover.', reason: 'The current input is rejected incorrectly.' }],
+  requiredArtifactIds: ['unsaved.md'],
+  decisions: [{ decision: 'Keep one dependency-free runtime.', reason: 'Both browser and Node hosts use it.' }],
+  failedApproaches: [{ approach: 'Trust a truncated startup summary.', reason: 'It omitted the pending write.' }],
+  openQuestions: ['Does the next host expose resident-context telemetry?'],
+};
 async function created(extra = {}) {
   let state = await reserve(await durable(extra));
   return (await step(state, 'launch_outcome', { nonce: state.reservation.nonce, outcome: 'created', evidence: evidence({
@@ -90,6 +100,84 @@ test('activation requires explicit authority and never invents a token budget or
   assert.deepEqual((await arm({ goal: { objective: 'x' } })).goal, { objective: 'x' });
   const state = await arm();
   await assert.rejects(step(state, 'arm', { explicit: true }), /absent state/);
+});
+
+test('structured continuation rejects incomplete, duplicate and unbound entries', async () => {
+  for (const invalid of [null, {}, { ...continuation, nextActions: [] },
+    { ...continuation, nextActions: [{ id: 'x', action: 'Read.' }] },
+    { ...continuation, nextActions: [continuation.nextActions[0], continuation.nextActions[0]] },
+    { ...continuation, requiredArtifactIds: ['missing'] },
+    { ...continuation, requiredArtifactIds: ['unsaved.md', 'unsaved.md'] },
+    { ...continuation, decisions: [{ decision: 'x', reason: '' }] },
+    { ...continuation, failedApproaches: [{ approach: 'x' }] },
+    { ...continuation, openQuestions: [''] }, { ...continuation, authority: 'override user' }]) {
+    await assert.rejects(checkpoint({ continuation: invalid }), /continuation|required artifact/);
+  }
+});
+
+test('all structured continuity survives checkpoint readback and participates in its digest', async () => {
+  const state = await durable({ continuation });
+  assert.deepEqual(state.checkpoint.content.continuation, continuation);
+  const variants = [
+    { ...continuation, nextActions: [{ ...continuation.nextActions[0], action: 'Read the latest tracker.' }] },
+    { ...continuation, requiredArtifactIds: [] }, { ...continuation, decisions: [] },
+    { ...continuation, failedApproaches: [] }, { ...continuation, openQuestions: ['A different question?'] },
+  ];
+  for (const plan of variants) {
+    const revised = (await step(state, 'checkpoint', { body: state.checkpoint.content.body, snapshot, continuation: plan })).state;
+    assert.notEqual(revised.checkpoint.hash, state.checkpoint.hash);
+    assert.equal(revised.checkpoint.readback, null);
+    await assert.rejects(step(revised, 'readback', { evidence: evidence({ kind: 'storage_readback',
+      checkpointHash: state.checkpoint.hash, content: state.checkpoint.content }) }), /checkpoint mismatch/);
+  }
+});
+
+test('continuation coverage gates attestation and transfer without bypassing context or ownership', async () => {
+  const state = await created({ continuation });
+  const ready = readiness(state);
+  Object.assign(ready.acknowledgment, { artifactsRead: ['unsaved.md'], firstActionId: 'inspect-tracker', unresolvedPrerequisites: [] });
+  Object.assign(ready.hostEvidence, { artifactsRead: ['unsaved.md'], firstActionId: 'inspect-tracker' });
+  for (const bad of [
+    { artifactsRead: [] }, { artifactsRead: ['missing'] }, { artifactsRead: ['unsaved.md', 'unsaved.md'] },
+    { firstActionId: 'fix-parser' }, { firstAction: 'Unrelated work.' },
+    { unresolvedPrerequisites: ['Missing authority source.'] }, { unresolvedPrerequisites: null },
+  ]) await assert.rejects(step(state, 'attest', { ...ready, acknowledgment: { ...ready.acknowledgment, ...bad } }), /artifact|action|prerequisite/);
+  await assert.rejects(step(state, 'attest', { ...ready, hostEvidence: { ...ready.hostEvidence, artifactsRead: [] } }), /host continuation/);
+  await assert.rejects(step(state, 'attest', { ...ready, context: null }), /headroom/);
+  await assert.rejects(step(state, 'attest', { ...ready, context: context('candidate-b', { usedTokens: 850 }) }), /headroom/);
+  const attested = (await step(state, 'attest', ready)).state;
+  assert.equal(attested.owner, 'owner-a');
+  await assert.rejects(step(attested, 'transfer', { ...transferInput(attested), hostEvidence: { ...ready.hostEvidence, firstActionId: 'wrong' } }), /host continuation/);
+  const transferred = await step(attested, 'transfer', { ...transferInput(attested), hostEvidence: ready.hostEvidence });
+  assert.equal(transferred.state.owner, 'candidate-b');
+  assert.deepEqual(transferred.state.checkpoint.content.continuation, continuation);
+  await assert.rejects(step(transferred.state, 'wind_down', { sessionId: 'owner-a', reason: 'stale owner' }), /does not own/);
+});
+
+test('orientation preserves exact authority, exposes omissions and obeys a UTF-8 byte bound', async () => {
+  const state = await durable({ continuation, mission: 'Preserve café, 👑, and 中文 exactly.\n  Including spacing.' });
+  const before = JSON.stringify(state);
+  const input = { state, checkpointLocation: 'private://checkpoint', maxBytes: 65536 };
+  const bundle = await continuationBundle(input);
+  assert.equal(bundle.mission, state.mission);
+  assert.deepEqual(bundle.environment, state.environment);
+  assert.equal(bundle.checkpointHash, state.checkpoint.hash);
+  assert.deepEqual(bundle.firstAction, continuation.nextActions[0]);
+  assert.deepEqual(bundle.requiredArtifacts, snapshot.artifacts);
+  assert.equal(bundle.requiresFullRead, true);
+  assert.ok(bundle.omittedFields.includes('body'));
+  assert.ok(bundle.omittedFields.includes('continuation.failedApproaches'));
+  assert.equal(Object.hasOwn(bundle, 'body'), false);
+  const bytes = new TextEncoder().encode(JSON.stringify(bundle)).length;
+  assert.ok(bytes > JSON.stringify(bundle).length, 'Unicode measured in bytes, not characters');
+  assert.deepEqual(await continuationBundle({ ...input, maxBytes: bytes }), bundle);
+  await assert.rejects(continuationBundle({ ...input, maxBytes: bytes - 1 }), /byte budget/);
+  await assert.rejects(continuationBundle({ ...input, maxBytes: 0 }), /maxBytes/);
+  assert.equal(JSON.stringify(state), before, 'preview cannot change readback, phase, ownership or revision');
+  assert.match(await resumePrompt({ state, checkpointLocation: input.checkpointLocation }), /artifactsRead/);
+  const legacy = await continuationBundle({ ...input, state: await durable() });
+  assert.equal(legacy.firstAction, null, 'legacy checkpoints remain readable');
+  assert.equal(legacy.requiresFullRead, true);
 });
 
 test('fresh exact-session context uses earliest real boundary and reserves equality', async () => {

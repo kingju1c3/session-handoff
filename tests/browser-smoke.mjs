@@ -20,7 +20,7 @@ try {
   page.on('pageerror', e => errors.push(e.message));
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   const result = await page.evaluate(async () => {
-    const { run, resumePrompt } = await import('/session-handoff.mjs');
+    const { run, resumePrompt, continuationBundle } = await import('/session-handoff.mjs');
     const now = Date.now();
     const environment = { workspaceId: 'browser-fixture', permissions: { mode: 'read-write' } };
     const snapshot = { workspace: { revision: 'fixture-v1' }, artifacts: [] };
@@ -39,7 +39,9 @@ try {
     const unknown = await step('check', { context: null });
     const projected = await step('check', { context: context(state.owner, { usedTokens: 42000 }) });
     await step('wind_down', { reason: 'Projected context crosses the host boundary.' });
-    await step('checkpoint', { body: 'Synthetic browser checkpoint with goal and next action.', snapshot });
+    await step('checkpoint', { body: 'Synthetic browser checkpoint with goal and next action.', snapshot,
+      continuation: { nextActions: [{ id: 'read-tracker', action: 'Read the live tracker.', reason: 'Verify current scope.' }],
+        requiredArtifactIds: [], decisions: [], failedApproaches: [], openQuestions: [] } });
     await step('readback', { evidence: evidence({ kind: 'storage_readback', checkpointHash: state.checkpoint.hash,
       content: JSON.parse(JSON.stringify(state.checkpoint.content)) }) });
     const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -48,10 +50,13 @@ try {
       evidence: evidence({ kind: 'host_session', sessionId: 'browser-candidate', status: 'starting', nonce }) });
     const bound = { sessionId: 'browser-candidate', nonce, checkpointHash: state.checkpoint.hash, environment, snapshot };
     const hostEvidence = evidence({ ...bound, kind: 'host_session', status: 'ready', checkpointReadAt: now,
+      artifactsRead: [], firstActionId: 'read-tracker',
       goalEvidence: { sessionId: 'browser-candidate', status: 'active', goal: state.goal, createdAt: now, inspectedAt: now } });
     const acknowledgment = evidence({ ...bound, readComplete: true, firstAction: 'Read the live tracker.',
+      artifactsRead: [], firstActionId: 'read-tracker', unresolvedPrerequisites: [],
       mission: state.mission, goal: state.goal, goalBudgetExplicit: true });
     const prompt = await resumePrompt({ state, checkpointLocation: 'synthetic-checkpoint' });
+    const bundle = await continuationBundle({ state, checkpointLocation: 'synthetic-checkpoint', maxBytes: 4096 });
     await step('attest', { acknowledgment, hostEvidence, context: context('browser-candidate') });
     await step('transfer', { candidateId: 'browser-candidate', nonce, checkpointHash: state.checkpoint.hash,
       writersQuiesced: true, snapshot, hostEvidence, context: context('browser-candidate') });
@@ -59,10 +64,12 @@ try {
     try { await step('wind_down', { sessionId: 'browser-owner', reason: 'stale actor' }); }
     catch { predecessorRejected = true; }
     return { owner: state.owner, budget: state.goal.token_budget, unknown: unknown.decision,
-      projected: projected.decision, predecessorRejected, promptHasDigest: /[a-f0-9]{64}/.test(prompt) };
+      projected: projected.decision, predecessorRejected, promptHasDigest: /[a-f0-9]{64}/.test(prompt),
+      bundleRequiresFullRead: bundle.requiresFullRead, bundleAction: bundle.firstAction.id };
   });
   assert.deepEqual(errors, []);
   assert.deepEqual(result, { owner: 'browser-candidate', budget: 12000, unknown: 'checkpoint_now',
-    projected: 'handoff', predecessorRejected: true, promptHasDigest: true });
+    projected: 'handoff', predecessorRejected: true, promptHasDigest: true,
+    bundleRequiresFullRead: true, bundleAction: 'read-tracker' });
   console.log(JSON.stringify({ browser: browser.version(), result, scope: 'Real Chromium execution; synthetic host evidence, no vendor session integration.' }));
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

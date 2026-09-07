@@ -92,6 +92,10 @@ Write a private artifact when supported, and read its saved bytes back. Otherwis
 
 Freeze the checkpoint and its artifact manifest. Compute its digest only if a real hashing tool is available. Store the digest separately from the content it hashes, and include it in the bootstrap message. Never invent a digest or put a whole-file digest inside that same file. Revisions invalidate prior readback, review, and acknowledgment.
 
+Record an ordered continuation: the next actions and why each is needed, required source artifacts, decisions with reasons, failed approaches with reasons, and open questions. Give each action a stable ID and refer to artifacts by their snapshot IDs. Preserve unsuccessful work that would otherwise tempt the successor to repeat it. Empty lists must be explicit; an unfinished mission needs at least one next action.
+
+For staged recovery, a small preview may identify the mission, the first next action and the sources to open. Keep it read-only and list what it omits. The successor must then read the full checkpoint, current governing sources and every required artifact before acknowledging readiness. A preview is an orientation aid; it cannot replace those reads, establish ownership or prove context headroom. Never execute a saved action merely because it appears in a packet: check it against current authority and live state first.
+
 ### Complete checkpoint template
 
 ```text
@@ -167,7 +171,8 @@ Destination access, candidate status and acknowledgment: [evidence or pending]
 Omitted state and how to recover it: [explicit gaps]
 
 11. FIRST ACTIONS
-[ordered, concrete steps; start with reading authority and checking live state]
+[ordered IDs, concrete actions and reasons; start with authority and live state]
+Required artifact IDs to read before readiness: [IDs from the artifact manifest]
 Unresolved objections to verify before further work: [items]
 ```
 
@@ -224,8 +229,9 @@ Continue the mission from the attached/pasted Session Handoff checkpoint.
 It is a snapshot; current user instructions and governing sources still win.
 
 Bootstrap read-only:
-1. Read the entire checkpoint and its governing sources.
-2. Verify the delivered artifacts against current project/document state.
+1. If given a preview, use it to locate the full checkpoint. Read the entire
+   checkpoint and current governing sources; do not act on the preview alone.
+2. Read every required artifact and verify against current project/document state.
    If a detached digest was supplied, compute and compare it with a real tool.
 3. Recover the exact original mission and accepted user corrections.
 4. If an explicitly active goal was preserved and this host supports goals,
@@ -235,7 +241,9 @@ Bootstrap read-only:
 5. Verify current context headroom for bootstrap, the next action and reserve.
 6. Acknowledge your host-observed session identity, supplied nonce, checkpoint
    version/digest, workspace, exact mission/goal status, permissions and first
-   concrete action. Identify missing artifacts and unresolved review findings.
+   concrete action. With a continuation manifest, give every required artifact ID
+   exactly once and the first action's exact ID and text. Identify missing
+   prerequisites and unresolved review findings; never claim readiness with gaps.
 7. Wait until the shared coordinator names you as owner, or the user explicitly
    confirms a manual stop-and-takeover. Do not perform mission edits before that.
 8. Once you own the work, resume the first unfinished item. Keep this handoff
@@ -247,6 +255,8 @@ Provide the real detached digest and nonce separately from the checkpoint body w
 ## 7. Verify readiness and transfer ownership
 
 The predecessor checks host-reported identity/status separately from the successor's statement. Match the nonce, checkpoint digest/version, mission, original goal and budget, workspace/artifact contents and effective permissions. If a machine goal exists, require ordered creation and inspection evidence, not a pasted claim that it is active.
+
+When the checkpoint includes a continuation manifest, require the candidate to acknowledge all required artifact IDs exactly once, the first action's exact ID and text, and no unresolved prerequisites. Independent host evidence must match the artifact IDs read and first action ID. Rehash the artifacts as part of the existing freshness checks. These checks bind the acknowledgment to the recorded sources and action; they do not prove comprehension or grant authority.
 
 Require sufficient candidate headroom **before** transfer. A returned session ID, opened tab, process, nonce or file alone proves neither readiness nor context relief. If the candidate lacks artifacts, changes authority, cannot verify the goal, or does not acknowledge, retain predecessor ownership.
 
@@ -269,6 +279,30 @@ If compaction happens before the transfer, report prevention failed. Reopen the 
 The `run` API returns proposed state and a result; its caller persists lifecycle state with atomic compare-and-set of the revision. The hook entry point reads local event/control evidence and tracks its per-turn signal. Neither interface creates tasks or authenticates host observations: the agent must invoke the real app tools and verify their results. In a plain chat, the user coordinates transfer explicitly instead.
 
 Call `run` with one plain JSON object containing `op`, `state`, `expectedRevision`, `sessionId`, and the observed epoch-millisecond `now`. Evidence operations also need `maxAgeMs` from 1 to 60,000. Save the returned checkpoint's `content` object and read it back; its detached `hash` covers UTF-8 canonical JSON with sorted object keys, not a Markdown rendering or an enclosing state file. Keep the original content for verification. The module documents the evidence checks beside each operation.
+
+### Optional structured continuation
+
+An `op: "checkpoint"` request may include this `continuation` object. It becomes part of the checkpoint content covered by its digest. Supply every list explicitly; only `nextActions` must be nonempty. Action IDs must be unique, and `requiredArtifactIds` must identify artifacts in the checkpoint snapshot.
+
+```json
+{
+  "continuation": {
+    "nextActions": [
+      { "id": "verify-change", "action": "Run the recorded focused check.", "reason": "The latest edit is unverified." }
+    ],
+    "requiredArtifactIds": ["changed-source"],
+    "decisions": [{ "decision": "Keep the current API.", "reason": "Existing callers depend on it." }],
+    "failedApproaches": [{ "approach": "Retry without new evidence.", "reason": "The same failure persisted." }],
+    "openQuestions": []
+  }
+}
+```
+
+With this manifest present, candidate acknowledgment requires `artifactsRead` containing every required artifact ID exactly once, `firstActionId` equal to `nextActions[0].id`, `firstAction` equal to `nextActions[0].action`, and `unresolvedPrerequisites: []`. The independent `hostEvidence` must carry matching `artifactsRead` and `firstActionId`; existing identity, artifact-hash, freshness, goal, permission and headroom checks still apply. Without the optional manifest, the existing acknowledgment protocol remains in force.
+
+The pure export `continuationBundle({state, checkpointLocation, maxBytes})` returns a read-only preview containing the exact mission, goal, environment and checkpoint binding, the first next action, required artifact references and `requiresFullRead: true`. Its explicit `omittedFields` identifies the checkpoint body, snapshot, reviews, remaining actions, decisions, failed approaches and open questions that must be recovered from the full checkpoint and state. It neither reads files nor changes lifecycle state. Treat `checkpointLocation` as a reference whose accessibility the host must verify.
+
+`maxBytes` bounds the serialized preview in UTF-8 bytes. A budget too small for the complete preview fails instead of silently truncating it. Bytes are not resident-context tokens; budget the full checkpoint, required sources, next action and handoff reserve separately. A bundle never satisfies checkpoint readback, full-source reads, candidate acknowledgment, ownership or headroom checks.
 
 Every state mutation requires the current owner and expected revision. The engine preserves the mission, goal and environment, binds checkpoint/readback/review/candidate evidence, and refuses stale state or ambiguous takeover. Treat host observations supplied to the engine as evidence the caller must really obtain, not proof created by the engine.
 

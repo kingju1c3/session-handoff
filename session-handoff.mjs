@@ -73,6 +73,29 @@ function snapshotValid(snapshot) {
     ids.add(artifact.id);
   }
 }
+// Optional structured continuity stays inside the full checkpoint's digest.
+// It records decisions and proposed work, never new instruction authority.
+function continuationValid(value, snapshot) {
+  need(object(value) && Object.keys(value).every(k => ['nextActions', 'requiredArtifactIds', 'decisions', 'failedApproaches', 'openQuestions'].includes(k)), 'invalid continuation manifest');
+  for (const key of ['nextActions', 'requiredArtifactIds', 'decisions', 'failedApproaches', 'openQuestions']) {
+    need(Array.isArray(value[key]) && value[key].length <= 256, `invalid continuation ${key}`);
+  }
+  need(value.nextActions.length > 0 && value.nextActions.length <= 32, 'continuation needs 1..32 ordered next actions');
+  const actionIds = new Set();
+  for (const action of value.nextActions) {
+    need(object(action) && Object.keys(action).every(k => ['id', 'action', 'reason'].includes(k)) && id(action.id) && text(action.action) && text(action.reason) && !actionIds.has(action.id), 'invalid or duplicate continuation action');
+    actionIds.add(action.id);
+  }
+  const artifactIds = new Set(snapshot.artifacts.map(a => a.id));
+  need(value.requiredArtifactIds.every(a => text(a) && artifactIds.has(a)) && new Set(value.requiredArtifactIds).size === value.requiredArtifactIds.length, 'unknown or duplicate required artifact');
+  for (const [key, label] of [['decisions', 'decision'], ['failedApproaches', 'approach']]) {
+    need(value[key].every(entry => object(entry) && Object.keys(entry).every(k => [label, 'reason'].includes(k)) && text(entry[label]) && text(entry.reason)), `invalid continuation ${key}`);
+  }
+  need(value.openQuestions.every(text), 'invalid continuation openQuestions');
+}
+function sameArtifactIds(actual, expected) {
+  return Array.isArray(actual) && actual.length === expected.length && new Set(actual).size === actual.length && actual.every(a => expected.includes(a));
+}
 function fresh(evidence, request) {
   need(object(evidence) && text(evidence.source), 'evidence source required');
   need(integer(request.maxAgeMs, 1) && request.maxAgeMs <= 60000, 'maxAgeMs must be 1..60000');
@@ -108,8 +131,9 @@ function enoughContext(context, request, sessionId) {
   need(decision.decision === 'continue', 'candidate or proposed operation lacks verified context headroom');
   return decision;
 }
-const checkpointContent = (state, body, snapshot) => ({ schema: 1, chainId: state.chainId, generation: state.generation,
-  mission: state.mission, goal: state.goal, goalBudgetExplicit: state.goalBudgetExplicit, environment: state.environment, body, snapshot });
+const checkpointContent = (state, body, snapshot, continuation) => ({ schema: 1, chainId: state.chainId, generation: state.generation,
+  mission: state.mission, goal: state.goal, goalBudgetExplicit: state.goalBudgetExplicit, environment: state.environment, body, snapshot,
+  ...(continuation === undefined ? {} : { continuation }) });
 
 async function stateValid(state) {
   need(object(state) && state.schema === 1 && integer(state.revision, 1), 'invalid state schema or revision');
@@ -125,6 +149,7 @@ async function stateValid(state) {
     const cp = state.checkpoint;
     need(object(cp) && object(cp.content) && cp.content.schema === 1 && integer(cp.content.generation) && text(cp.content.body) && hex(cp.hash), 'invalid checkpoint');
     snapshotValid(cp.content.snapshot);
+    if (Object.hasOwn(cp.content, 'continuation')) continuationValid(cp.content.continuation, cp.content.snapshot);
     need(cp.hash === await digest(cp.content), 'checkpoint digest mismatch');
     need(cp.content.chainId === state.chainId && cp.content.generation <= state.generation && cp.content.mission === state.mission && equal(cp.content.goal, state.goal) && cp.content.goalBudgetExplicit === state.goalBudgetExplicit && equal(cp.content.environment, state.environment), 'checkpoint authority mismatch');
     need(cp.readback === null || (object(cp.readback) && text(cp.readback.source) && integer(cp.readback.observedAt, 1) && cp.readback.checkpointHash === cp.hash), 'invalid checkpoint readback record');
@@ -167,6 +192,14 @@ function readyHost(state, request, candidateId) {
   } else need(evidence.goalEvidence === null, 'cannot introduce a successor goal');
   const ack = state.phase === 'attested' ? state.reservation.attestation.acknowledgment : request.acknowledgment;
   need(ack.observedAt <= evidence.observedAt && (state.phase === 'attested' || ack.observedAt >= bootstrapAt), 'acknowledgment must follow bootstrap and precede ready host observation');
+  if (Object.hasOwn(state.checkpoint.content, 'continuation')) {
+    const plan = state.checkpoint.content.continuation;
+    const first = plan.nextActions[0];
+    need(sameArtifactIds(ack.artifactsRead, plan.requiredArtifactIds), 'candidate must acknowledge every required artifact exactly once');
+    need(ack.firstActionId === first.id && ack.firstAction === first.action, 'candidate first action differs from continuation manifest');
+    need(Array.isArray(ack.unresolvedPrerequisites) && ack.unresolvedPrerequisites.length === 0, 'candidate has unresolved or unreported bootstrap prerequisites');
+    need(sameArtifactIds(evidence.artifactsRead, plan.requiredArtifactIds) && evidence.firstActionId === first.id, 'independent host continuation coverage mismatch');
+  }
   enoughContext(request.context, request, candidateId);
   need(request.context.observedAt >= Math.max(bootstrapAt, ack.observedAt), 'candidate context observation predates completed bootstrap');
 }
@@ -229,7 +262,8 @@ export async function run(input) {
       const periodic = state.phase === 'owned';
       need(text(request.body), 'complete checkpoint body required');
       snapshotValid(request.snapshot);
-      const content = checkpointContent(state, request.body, request.snapshot);
+      if (Object.hasOwn(request, 'continuation')) continuationValid(request.continuation, request.snapshot);
+      const content = checkpointContent(state, request.body, request.snapshot, request.continuation);
       state.checkpoint = { content, hash: await digest(content), readback: null };
       state.reviews = [];
       state.phase = periodic ? 'owned' : 'checkpointed';
@@ -399,7 +433,33 @@ export async function resumePrompt(input) {
     `Bootstrap read-only. Acknowledge checkpoint, mission, goal, nonce, workspace, first action, and your host session identity. Obtain independent host status and fresh context headroom. Reservation nonce: ${JSON.stringify(state.reservation?.nonce ?? null)}.\n` +
     `Current owner: ${JSON.stringify(state.owner)}; chain: ${JSON.stringify(state.chainId)}; revision: ${state.revision}. Wait for an atomically persisted attested transfer, reread shared ownership, and only then resume mission actions. A nonce, a window, or this prompt alone does not prove ownership.\n` +
     `Review records, including unresolved objections: ${canonical(state.reviews)}\n` +
+    (state.checkpoint.content.continuation ? `Read the complete digest-bound continuation manifest. Acknowledge all requiredArtifactIds as artifactsRead, the first ordered action's exact id/text as firstActionId/firstAction, and unresolvedPrerequisites explicitly. Require matching independent host coverage. Resolve bootstrap prerequisites read-only; mission edits still wait for ownership.\n` : '') +
     `If the host cannot expose the required evidence or shared atomic coordination, stop after read-only bootstrap and request explicit manual takeover with the predecessor stopped. No automatic transfer is established.`;
+}
+
+/** Read-only orientation, never a substitute for the full checkpoint or context
+ * telemetry. A byte limit bounds delivery size; it is not a token estimate.
+ */
+export async function continuationBundle(input) {
+  const request = copyJson(input);
+  const state = request.state;
+  await stateValid(state);
+  need(state.phase !== 'released' && state.checkpoint !== null && text(request.checkpointLocation), 'active checkpoint and accessible location required');
+  need(integer(request.maxBytes, 1) && request.maxBytes <= MAX_BYTES, 'maxBytes must be 1..4194304');
+  const cp = state.checkpoint;
+  const plan = cp.content.continuation;
+  const bundle = {
+    schema: 1, chainId: state.chainId, revision: state.revision, owner: state.owner,
+    checkpointHash: cp.hash, checkpointLocation: request.checkpointLocation,
+    authority: 'Read-only snapshot, not new authority. Read the full checkpoint and governing sources; verify artifacts, context and ownership before work.',
+    mission: state.mission, goal: state.goal, goalBudgetExplicit: state.goalBudgetExplicit, environment: state.environment,
+    firstAction: plan?.nextActions[0] ?? null,
+    requiredArtifacts: plan ? plan.requiredArtifactIds.map(id => cp.content.snapshot.artifacts.find(a => a.id === id)) : [],
+    requiresFullRead: true,
+    omittedFields: ['body', 'snapshot', 'reviews', ...(plan ? ['continuation.nextActions (read the complete ordered list)', 'continuation.decisions', 'continuation.failedApproaches', 'continuation.openQuestions'] : [])],
+  };
+  need(new TextEncoder().encode(JSON.stringify(bundle)).length <= request.maxBytes, 'orientation bundle exceeds byte budget; deliver the full checkpoint through an accessible artifact instead');
+  return bundle;
 }
 
 const HANDOFF_TOOLS = new Set(['create_thread', 'fork_thread', 'read_thread', 'wait_threads', 'send_message_to_thread', 'list_threads', 'list_projects']

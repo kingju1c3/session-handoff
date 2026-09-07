@@ -31,6 +31,10 @@ Long chats can get shortened by the app, leaving the AI with less of the convers
 A **handoff** means giving those notes and any needed files to a fresh chat so it can continue
 the work.
 
+The notes also preserve what did not work and why. The next chat can start with a short guide
+to the full notes, then confirm it has read the needed files and name its first step before
+continuing.
+
 ## Quickstart
 
 1. Open the [instructions file](https://raw.githubusercontent.com/kingju1c3/session-handoff/main/SKILL.md)
@@ -86,7 +90,8 @@ can still open a task now when the app allows it, but cannot promise a later aut
    Otherwise, open a new chat and add the full skill instructions,
    notes, needed files, and the message the AI gives you.
 3. **Check what arrived.** The new chat reads the notes and checks that it can open the files
-   it needs. Old attachments may not follow automatically, so you may need to add them again.
+   it needs. When a required reading list is provided, it confirms each file and the recorded
+   first step. Old attachments may not follow automatically, so you may need to add them again.
 4. **Continue in one place.** Stop work in the old chat before the new one continues. For a
    manual move, tell the new chat that the old one has stopped and it can take over.
 
@@ -109,6 +114,18 @@ permission to share them there.
 in Node.js and a browser using standard platform APIs, with no third-party runtime dependencies.
 It validates the handoff sequence; the app supplies tools for files, sessions, and coordinated
 state updates. [SKILL.md](SKILL.md) contains the full instructions for the AI.
+
+Optional structured continuation records ordered actions, required artifacts, decision reasons,
+failed approaches and open questions inside the checkpoint digest. `continuationBundle` provides
+a preview with a UTF-8 byte limit and explicit omissions; the successor still reads the full
+checkpoint and required sources before readiness. A preview is not a context-token measurement
+or an ownership transfer. See the [API contract](SKILL.md#optional-structured-continuation).
+
+This independently implemented design draws inspiration from Engram's
+[staged startup](https://github.com/staticroostermedia-arch/engram/blob/4203062b33d4a5ca14a4f7ffefc20fb1478dc2f7/grok-plugin-engram/skills/engram-wake-up/SKILL.md),
+[decision and failure records](https://github.com/staticroostermedia-arch/engram/blob/4203062b33d4a5ca14a4f7ffefc20fb1478dc2f7/grok-plugin-engram/skills/engram-working-memory/SKILL.md),
+and [session-end records](https://github.com/staticroostermedia-arch/engram/blob/4203062b33d4a5ca14a4f7ffefc20fb1478dc2f7/grok-plugin-engram/skills/engram-session-end/SKILL.md).
+No Engram code or prose is included, and no Engram backend is required.
 
 The same module exports `evaluateCodexHook` and provides a Node-only `--codex-hook` entry point.
 The [Codex setup recipe](SKILL.md#codex-automatic-setup-connect-the-trigger-and-task-controls)
