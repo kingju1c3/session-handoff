@@ -39,6 +39,18 @@ test('compiled archive contains only one runtime and complete standalone instruc
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('Gemini Spark guidance remains a manual, checkpoint-first handoff', async () => {
+  const skill = await readFile(join(root, 'SKILL.md'), 'utf8');
+  const readme = await readFile(join(root, 'README.md'), 'utf8');
+  assert.match(skill, /### Gemini Spark: manual fresh-chat handoff/);
+  assert.match(skill, /save and read back the complete checkpoint first/);
+  assert.match(skill, /do not claim that a checkpoint can create a conversation automatically/);
+  assert.doesNotMatch(skill, /default_api:create_conversation/);
+  assert.match(readme, /Claude/, 'README names Claude support');
+  assert.match(readme, /ChatGPT and Codex/, 'README names ChatGPT and Codex support');
+  assert.match(readme, /Gemini Spark/, 'README names Gemini Spark support');
+});
+
 test('engine imports in a clean process with no installed skills or companion files', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'session-clean-'));
   try {

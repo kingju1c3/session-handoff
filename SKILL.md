@@ -76,6 +76,14 @@ The `PreCompact` handler returns `continue: false` to stop compaction only for a
 
 Bind observations to the actual task, not just its working directory. Codex subagent hook events can carry the parent's `session_id`; reconcile transcript and task identity before treating an event as root-task evidence. After transfer, disarm the predecessor's control and prepare a new exact-session control for the successor under the same authorized mission and remaining attempt cap. Do not reset the history or claim new hook trust automatically.
 
+### Gemini Spark: manual fresh-chat handoff
+
+Gemini Spark is supported through the same complete checkpoint and successor bootstrap, using the Gemini app's visible controls. Spark has no verified skill-installation or agent API in this workflow, so do not claim that a checkpoint can create a conversation automatically or invoke an undocumented tool.
+
+For an armed handoff, save and read back the complete checkpoint first. Ask the user to select **New chat** in Gemini Spark, then attach the checkpoint and required files through **Add files** or **Upload & tools**, or paste the complete checkpoint and successor bootstrap when attachments are unavailable. The successor must read the complete checkpoint, current governing sources, and every required artifact before it edits work.
+
+Treat a new Gemini Spark tab or chat as delivery evidence only. It does not establish context headroom, file access, acknowledgment, ownership, or a completed transfer. Keep the predecessor read-only after its checkpoint until the user confirms the manual stop-and-takeover. If Spark exposes a documented native session control in the future, inspect and verify that control before using it; never infer it from a product name or UI appearance.
+
 ## 3. Wind down and preserve the work
 
 Stop expanding the task. Mark the owner as winding down. Drain task-owned workers and processes within the remaining budget; record completed, cancelled and still-active operations by exact identity. Do not stop unrelated work. At an immediate deadline, checkpoint partial work rather than waiting for a tidy result.
@@ -275,6 +283,8 @@ If compaction happens before the transfer, report prevention failed. Reopen the 
 ## One runtime, when execution is available
 
 `session-handoff.mjs` is the single implementation of the budget and lifecycle checks, including `evaluateCodexHook`. Its core ECMAScript exports run in Node.js and browser JavaScript with Web Crypto. The Node-only `--codex-hook` entry point connects actual Codex events to feedback using the private session control. The complete instructions above remain usable in text-only apps.
+
+For Gemini Spark, use the manual path above: the user starts a fresh chat and supplies the full checkpoint and required files. Do not represent the browser UI, a new chat, or an undocumented API as an automatic dispatch or verified handoff.
 
 The `run` API returns proposed state and a result; its caller persists lifecycle state with atomic compare-and-set of the revision. The hook entry point reads local event/control evidence and tracks its per-turn signal. Neither interface creates tasks or authenticates host observations: the agent must invoke the real app tools and verify their results. In a plain chat, the user coordinates transfer explicitly instead.
 

@@ -49,6 +49,16 @@ It can use a small preview to orient the new chat, but the full checkpoint remai
 truth. A preview never proves that the new chat has enough context, has access to every file, or
 owns the task.
 
+## Supported AI apps
+
+The complete instructions work in **Claude**, **ChatGPT and Codex**, and **Gemini Spark**. Each uses the controls its app actually exposes:
+
+- **Claude:** attach or paste the skill and the checkpoint; install it when your Claude plan and workspace support skills.
+- **ChatGPT and Codex:** attach or install the skill. Codex can use its separately trusted hook adapter and native task controls when they are available.
+- **Gemini Spark:** attach or paste the skill and handoff checkpoint in a **New chat**. Use [Add files or Upload & tools](https://support.google.com/g/answer/16576596?hl=en) for required files. Gemini Spark has no verified automatic conversation-creation interface in this skill, so the user opens the fresh chat and the successor confirms what it received.
+
+Every path retains the same safeguard: a new chat, uploaded file, or visible tab does not by itself prove that the successor read the checkpoint, can access its files, has enough room, or owns the work.
+
 ## Quickstart
 
 1. Open the [instructions file](https://raw.githubusercontent.com/kingju1c3/session-handoff/main/SKILL.md)
