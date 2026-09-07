@@ -3,38 +3,28 @@
   "evals": [
     {
       "id": 1,
-      "name": "early-boundary-large-next-result",
-      "prompt": "Offline scenario: Use session-handoff for my ongoing migration. The host reports this exact session at 38,000 resident tokens in a 100,000-token effective window and auto-compacts at 60,000. The next proposed tool result can add 19,000 tokens; checkpoint, successor bootstrap and transfer need 6,000. Telemetry was measured now and identifies this session. Our dirty migration files have not been committed. The host offers a fresh-session tool and independent status lookup but its pre-compaction hook is advisory. Describe the next action and save a concise continuation plan. Do not run actual tools or spawn a real session in this exercise.",
-      "expected_output": "Checkpoint before the large tool call; account for 63,000 projected tokens; fresh successor with dirty artifacts, acknowledgment and one owner; no hook veto claim.",
+      "name": "browser-with-only-this-skill",
+      "prompt": "I am using an offline browser LLM chat. I only attached this SKILL.md; no other skills installed, no CLI, JavaScript runner, filesystem, context meter, or API for creating chats. My exact mission is 'Finish the supplier comparison without inventing prices.' Supplier A has been transcribed, supplier B's warranty appendix is missing, and supplier C has not been read. My latest correction is to prioritize warranty before price. Prepare the complete handoff I can use in a fresh chat before context is lost. Deliver the artifact now; do not claim tool operations happened or just offer to continue.",
+      "expected_output": "Immediate complete copyable continuation + bootstrap, preserves exact task/correction/missing evidence, no other skill/template/runtime prerequisite, early manual new session and explicit unknown timing.",
       "files": [],
       "assertions": [
-        "Stops before the 19,000-token tool action and identifies the 63,000-token projected need.",
-        "Does not claim the advisory pre-compaction hook can block compaction.",
-        "Preserves dirty work and requires candidate acknowledgment before ownership transfer."
+        "Delivers a complete copyable checkpoint and actionable successor startup instructions now, without requiring another skill, template file, shell, JavaScript runtime or API.",
+        "Preserves the exact mission, warranty-before-price correction, A transcribed, B warranty appendix missing and C unread; does not invent supplier content or prices.",
+        "Uses an early manual fresh-chat path for unavailable telemetry and session controls; makes no universal timing, fabricated digest, file save or launched-session claim.",
+        "Explains destination attachment/source gaps and explicit predecessor stop/manual takeover before successor mission work."
       ]
     },
     {
       "id": 2,
-      "name": "unknown-host-manual-fallback",
-      "prompt": "Offline scenario: Please use session-handoff to keep this report going before compaction. This chat has no token display, no published compaction threshold, no filesystem tools, no session-creation API and no hooks. My report objective is 'Compare the three supplied proposals without inventing missing costs.' Verified: proposal A is fully transcribed; B's appendix is missing; C has not been read. Decision: missing prices stay unknown. Produce what I can use right now to continue in a new chat. Do not invent host capabilities or call actual tools in this exercise.",
-      "expected_output": "Immediate copyable checkpoint/resume prompt with objective and missing evidence; manual early new chat, no guessed percentages or automatic guarantee.",
+      "name": "desktop-rejects-false-readiness",
+      "prompt": "Offline desktop-app scenario. The handoff is armed for the exact goal {'objective':'Finish migration A without changing billing behavior','token_budget':12000}; I explicitly set that budget. Host tools can create and inspect new sessions. This session has 42,000 resident tokens, an effective 100,000 window, and a 60,000 compaction boundary. The proposed tool result may add 14,000 tokens and handoff needs 6,000. Current checkpoint v3 was read back; its detached digest is D3, nonce N3, workspace snapshot W3. One reserved fresh-session creation timed out. Host lookup now finds candidate S2, but S2 acknowledges v2/D2/W2, omits the goal budget, and its headroom is unknown. The old owner still owns the task and has untracked files. Give the precise next steps and an updated continuation-status block. Do not call real tools or claim an actual handoff happened.",
+      "expected_output": "Defer tool projected62000, checkpoint untracked state, keep existing candidate reservation/owner, fix checkpoint delivery/goal and verify budget+headroom independent host evidence before transfer, no blind new session/fork or false readiness.",
       "files": [],
       "assertions": [
-        "Produces an immediately copyable checkpoint/resume artifact with the exact objective.",
-        "Preserves the missing B appendix, unread C, and unknown-price decision.",
-        "States manual early new-chat workflow without a guessed threshold or automatic timing guarantee."
-      ]
-    },
-    {
-      "id": 3,
-      "name": "full-history-fork-and-ambiguous-launch",
-      "prompt": "Offline scenario: Fork this armed mission before compaction. The host reports 76% current context and an 80% compaction boundary. Its fork copies the full stored transcript and does not report candidate headroom. A fresh-session request has already timed out; the host cannot yet confirm whether a session was created. The predecessor still owns the lease, which says SPAWN_REQUESTED with one pending reservation. There are untracked work files. Describe the concrete safe next steps and continuation status. Do not call actual tools or launch anything in this exercise.",
-      "expected_output": "Immediate checkpoint, reject unverified full-history fork as relief, retain pending reservation and owner, inspect timed-out creation before retry, preserve untracked artifacts, no claimed transfer.",
-      "files": [],
-      "assertions": [
-        "Rejects the full-history fork with unmeasured headroom as verified context relief.",
-        "Retains the uncertain spawn reservation and checks host status before any retry.",
-        "Preserves untracked files and predecessor ownership; does not claim transfer completed."
+        "Computes 42000 + 14000 + 6000 = 62000 against the 60000 boundary and defers the proposed large tool action.",
+        "Retains old ownership and the existing reserved candidate after timeout, reconciles S2 instead of blindly creating another session, and preserves actual untracked contents.",
+        "Rejects v2/D2/W2 and omitted budget; requires current v3/D3/W3 acknowledgment plus exact active goal objective and explicit 12000 budget creation then inspection.",
+        "Requires fresh independent candidate identity/status, sufficient context headroom, artifact/permission checks and quiesced writers before atomic transfer; status accurately remains not transferred."
       ]
     }
   ]

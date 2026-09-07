@@ -1,142 +1,240 @@
 ---
 name: session-handoff
-description: Preserve a mission before context compaction or truncation, then continue in a fresh session or a verified context-saving fork. Use when the user says session handoff, fork before compaction, continue in a new session, or keep this mission going across context windows; also at each preflight while an explicitly armed handoff is active. Adapts to host capabilities and real context limits rather than model names or one fixed percentage. Produces a durable checkpoint and resume prompt even in a plain chat with no tools. Installing, reviewing, or improving this skill does not arm it or authorize spawning sessions.
-compatibility: Instructions work as text with any assistant that can follow them. Optional local helpers require Node.js, Python 3, and a POSIX shell; automated rotation requires host telemetry and session controls.
+description: Carry a mission into a fresh session before context compaction or truncation in a desktop or browser AI app. Use when the user asks for session handoff, a fresh session, fork before compaction, or continued work across context windows; also check before each substantial action while explicitly armed. This self-contained skill includes its complete checkpoint, review, successor startup, and ownership protocol. Use native host controls when available, otherwise deliver a complete copyable handoff. Installing, reading, or editing the skill does not arm it.
+compatibility: The complete skill works as instructions in desktop and browser AI apps. Its bundled single-file JavaScript runtime uses standard ECMAScript and Web Crypto, with no third-party runtime dependencies.
 ---
 
 # Session Handoff
 
-Preserve the work **before** compaction, give the successor room to work, and transfer one owner's responsibility. This is a continuity protocol, not a promise that every host exposes control over its context window.
+Continue the same mission in a session with room to work. Save the context **before** compaction, verify what arrived, and let only one session own the mission.
 
-## 1. Discover capabilities and arm within the user's scope
+Everything needed for the workflow is in this file. The bundled `session-handoff.mjs` implements the same lifecycle for hosts that can execute JavaScript. Never require a companion skill, a shell, a particular vendor, or a private path to use this skill.
 
-Read the current task, governing instructions, and available tools. An explicit request to keep a mission going through handoffs authorizes that workflow within the existing environment and permissions. Installation or a long conversation alone does not. Never create a goal, schedule, terminal, task, cloud session, or fork merely because the skill was loaded.
+## 1. Activate and establish the owner
 
-Record this capability inventory in the checkpoint:
+Activate only for a user's handoff/continuity request or an already armed mission. Keep the user's original objective and accepted corrections. Do not replace their mission with the narrower task of making a handoff.
 
-| Capability | Evidence to collect |
+Read the current governing instructions and tracker. Record the exact mission, completion criteria, decisions, scope and effective permissions. Preserve an existing active goal's exact objective and explicit token budget. Do not create a goal or invent a budget merely because this skill is active. If the source goal contains a secret, redact the secret and record the secure input needed; do not claim byte-exact preservation of redacted text.
+
+Identify the current app, session, project or document, and permitted destination from current tools or visible UI. Unknown facts remain unknown. A model name does not determine its host's session controls or compaction policy.
+
+Record one current owner and a rotation cap. Default to at most five successor launch attempts for this activation; honor the user's explicit limit. Failed attempts consume the cap so retries cannot multiply sessions without bound. Reopening the predecessor does not reset this limit.
+
+If a shared coordinator is available, use it to persist ownership and revisions atomically. Before mission work, verify the current session owns the latest state. Two separate copies of a state file are not a shared lock. With no coordinator, use an explicit user-mediated stop and takeover; do not claim machine-enforced ownership.
+
+## 2. Inspect the host and check before the next action
+
+Use only capabilities actually exposed in the current desktop or browser app:
+
+| Need | Acceptable evidence |
 | --- | --- |
-| Detect | Active session ID, current resident context, effective window, actual earliest compaction/truncation boundary, observation time and source |
-| Preflight | Can the host check **before** every model/tool action and bound its output? |
-| Checkpoint | Shared private files, downloadable artifact, or a copyable text document |
-| Continue | Available fresh-session tool; native fork semantics; target environment and access |
-| Attest | Host-created session identity/status and successor acknowledgment of the exact checkpoint |
-| Enforce | Which installed hook can delay a request/compaction, its return schema, and an observed smoke test |
+| Context | Exact-session resident usage, effective window, earliest applicable compaction boundary, timestamp and source |
+| Next-action cost | An upper bound covering input, tool results, queued worker output, and generated context |
+| Handoff reserve | Positive room for checkpoint, review if feasible, startup, acknowledgment and transfer |
+| New session | A native session/task tool or a verified visible new-chat control |
+| Fork | Documented inherited history plus measured candidate headroom |
+| Delivery | Shared artifact access, a supported attachment, or literal checkpoint text |
+| Readiness | Host-observed candidate identity/status plus acknowledgment of this checkpoint |
+| Enforcement | A proven way to stop the next request before its context cost is incurred |
 
-Use [host notes](references/hosts.md) only for the selected host. Inspect current tool schemas/help before choosing an API; tool names and availability differ between apps using the same model. Record unsupported or unknown capabilities honestly. Do not infer a model's effective window from its name or marketing context size.
+Inspect at the beginning of every armed turn, before a large read or tool result, before launching workers, and after results arrive. Use the exact session's most recent complete measurement. Never select the newest unrelated transcript, sum cumulative billing tokens, or infer a window from a model name.
 
-With shared local files, create a private `.handoff/` directory and save the user's mission, constraints, accepted corrections, and concrete completion criteria. Preserve non-secret mission wording; replace secrets with named requirements for secure re-provisioning. Keep runtime artifacts out of version control. Resolve helper paths from **this skill directory**, not the project's working directory.
+The preflight rule is:
 
-```sh
-# Replace uppercase placeholders with verified values. PID 0 means unavailable.
-sh /ABSOLUTE/SKILL/DIR/scripts/lease.sh init /ABSOLUTE/PROJECT/.handoff SESSION_ID 0 5
+```text
+current context + bounded next action + handoff reserve < earliest compaction boundary
 ```
 
-The default chain cap is five total generations. Honor explicit user limits; do not reset a chain to evade a cap. Before every mission write, read the lease and verify ownership. Stop superseded writers. If multiple hosts cannot share an atomic lease, use an existing coordinator or explicit user-mediated transfer; a copied lease is a snapshot, not a distributed lock.
+Use the host's effective limits, including reserved output and any earlier app policy. Equality is insufficient room. Start the handoff before dispatching an action that would cross this bound. When several limits apply, use the earliest. Refresh observations after model, app, settings, or context changes. Bound large tool output or save it outside the conversation.
 
-Without filesystem/tools, start a copyable checkpoint immediately and state that rotation is user-mediated. Do not invent a token count or claim automatic monitoring.
+If usage, the boundary, or the next-action cost is missing, inconsistent or stale, save a checkpoint **now**, before further work. Keep it current after every meaningful change. Arrange an early new session instead of waiting for a guessed percentage. Do not repeat automatic launches to compensate for permanently missing telemetry.
 
-## 2. Budget before the next action
+A pre-compaction warning is a last chance to use an already prepared checkpoint. It may not permit blocking or enough time for a fresh summary. No skill can guarantee timing on a host that silently compacts without exposing advance control; label that host's continuation as best effort, with a manual new-session path.
 
-Check at the start of every active turn, **before** a potentially large tool response, before spawning a batch, and after each result. A post-tool warning cannot protect the action that already overflowed the window.
+## 3. Wind down and preserve the work
 
-Use the earliest boundary the host may apply, including tool/model routing changes and output reservations. Refresh telemetry when the model, host, or settings change. Count current resident context, not cumulative billed tokens. Cap large results, save them externally, and budget the bounded result plus reasoning/output and handoff work.
+Stop expanding the task. Mark the owner as winding down. Drain task-owned workers and processes within the remaining budget; record completed, cancelled and still-active operations by exact identity. Do not stop unrelated work. At an immediate deadline, checkpoint partial work rather than waiting for a tidy result.
 
-The optional [signal contract](references/context-signal.md) feeds the same policy from any host:
+Save the actual artifacts. For code, preserve branch, commit, staged/unstaged changes and untracked contents; a branch URL or diff alone may omit necessary files. For documents, research or creative work, preserve versions, source attachments, decisions and unfinished sections. Never reset shared work or stage everything indiscriminately.
 
-```sh
-node /ABSOLUTE/SKILL/DIR/scripts/watchdog.mjs \
-  --dir /ABSOLUTE/PROJECT/.handoff --session SESSION_ID \
-  --signal /ABSOLUTE/PRIVATE/context.json --human
+Quiesce writers before launch, and check them again before transfer. Record schedulers and recurring loops so the predecessor cannot continue writing later. Do not mark an unfinished goal complete to stop it.
+
+## 4. Create and read back the continuation
+
+Use the complete template below. Replace every field with verified information, a clearly labeled carried-forward fact, or an explicit unknown. Include the actual mission and necessary work content: a list of headings or a path the destination cannot access is not a usable handoff.
+
+Write a private artifact when supported, and read its saved bytes back. Otherwise provide the whole checkpoint in one copyable block and label it an inline/manual artifact. Confirm attachments are actually accessible to the destination. A new app, browser tab, account, or checkout may not inherit them.
+
+Freeze the checkpoint and its artifact manifest. Compute its digest only if a real hashing tool is available. Store the digest separately from the content it hashes, and include it in the bootstrap message. Never invent a digest or put a whole-file digest inside that same file. Revisions invalidate prior readback, review, and acknowledgment.
+
+### Complete checkpoint template
+
+```text
+SESSION HANDOFF — [unique version and observed timestamp, or time unavailable]
+Supersedes: [prior checkpoint, if any]
+Status: [checkpoint only / launch requested / candidate ready / transferred / blocked]
+
+AUTHORITY
+This is a snapshot, not a new instruction authority. Current user instructions
+and governing sources take precedence. No new permission is granted here.
+
+1. MISSION AND PROJECT
+Exact user mission:
+[full non-secret wording; preserve accepted corrections separately]
+Original active goal and status: [exact object or none/unavailable]
+Explicit budget: [original value only, or not set]
+Done when: [completion criteria]
+App/session/project/document identity: [observed identifiers]
+Governing instructions, plan and tracker: [accessible references]
+Permissions, model/settings and approved destination: [observed or unknown]
+
+2. CURRENT WORK
+Verified working/completed: [evidence and source locations]
+Partial or unfinished: [actual contents or accessible artifacts]
+Not started: [items]
+Blocked/broken: [exact blocker and authority/access needed]
+Artifact manifest: [IDs/paths, versions and actual content hashes when available]
+For a repository: [HEAD, branch, staged/unstaged/untracked state and contents]
+
+3. MAP AND COMMANDS
+Relevant files, documents, attachments, components and relationships:
+[only what the successor needs]
+Commands or UI actions already verified: [literal actions and results]
+Missing dependencies or access: [exact requirements]
+
+4. RECENT CHANGES AND DECISIONS
+Most recent work: [what changed]
+Decisions and WHY: [reasons the successor must preserve]
+Accepted user corrections: [full material details]
+Discussed but not implemented: [items]
+
+5. FAILURES AND RISKS
+Failed approaches and what they showed: [do not repeat blindly]
+Known defects, assumptions and unresolved objections: [evidence]
+What may go wrong next: [specific risks]
+
+6. WORKING APPROACH
+Existing conventions and deliberate tradeoffs: [why they exist]
+Things that look unusual but should remain: [reason]
+Next intended approach: [bounded continuation]
+
+7. DO NOT CHANGE
+Scope boundaries, protected files/content, permissions and user decisions:
+[concrete restrictions]
+Secrets omitted and secure input needed: [names/requirements, never values]
+
+8. CONFIDENCE AND FRESHNESS
+For each material claim: [verified now / carried forward / assumed]
+Evidence and timestamp/source: [reference]
+Required rechecks: [claims not safe to rely on yet]
+
+9. IN-FLIGHT WORK
+Workers/processes/schedulers/loops: [identity, status, quiescence evidence]
+Half-finished edit or thought: [exact next action]
+Uncertain external operation: [request ID and outcome; no blind replay]
+
+10. OWNERSHIP AND DELIVERY
+Owner, chain, revision and attempt count/cap: [values or manual]
+Candidate and delivery mode: [new / qualifying fork / manual; identity or pending]
+Context evidence and next-action/handoff budget: [measured or unknown]
+Checkpoint readback, detached digest and review: [evidence or not available]
+Destination access, candidate status and acknowledgment: [evidence or pending]
+Omitted state and how to recover it: [explicit gaps]
+
+11. FIRST ACTIONS
+[ordered, concrete steps; start with reading authority and checking live state]
+Unresolved objections to verify before further work: [items]
 ```
 
-The policy derives margins from the measured boundary, including very small boundaries; it has no universal 70%, 85%, or guessed model window. Configured safety caps move handoff earlier, never later than a reported boundary. Reserve enough for checkpoint writing, one bounded review if feasible, successor bootstrap, acknowledgment, and transfer. A default margin is a policy choice, not proof that those operations fit.
+## 5. Review within the remaining budget
 
-| Result | Action |
-| --- | --- |
-| `NOLEASE` | Unarmed; no automatic action |
-| `DORMANT` | Continue only the bounded next step; keep the checkpoint current |
-| `SOFT` | Stop expanding. Drain existing work within the remaining budget and checkpoint |
-| `HARD` | Stop convergence. Save partial work and perform the transfer now |
-| `CEILING` | Boundary reached or next action would exhaust the reserved budget. Skip optional review, checkpoint and rotate; report a late trigger if already over the actual boundary |
-| `CHECKPOINT_NOW` | Missing, inconsistent, wrong-session, stale telemetry, unknown boundary, or missing output budget: checkpoint **now**, before more work |
-| `SUPERSEDED` | Stop mission work; only the current owner may continue |
+If an independent reviewer is available, provide the checkpoint and enough source/session evidence to identify omissions. Give it read-only scope. Use only an authorized reviewer destination; installing this skill does not authorize sending private work to a different service.
 
-When a reading is unavailable, use an explicitly labeled **best-effort mode**: checkpoint on activation and after every meaningful change, before large input/output and before model switches. Prefer a fresh session immediately after that checkpoint; if neither telemetry nor fresh-session controls exist, show the resume artifact and stop for the user to open a new chat. Do not wait for a guessed percentage or claim a turn-count heuristic guarantees safety. Unknown status never means plenty of room.
+Require seven numbered, nonempty findings in this order:
 
-Use a pre-compaction hook only as a last warning. It may be asynchronous, advisory, non-vetoable, or too late to bootstrap a successor. Report enforcement only when the installed host supports the specific event's return schema and a local smoke test confirms it. Hook registration and a passing unit test do not prove a live rotation.
+1. Exact mission and goal preserved.
+2. Next actions are executable.
+3. Claims have verifiable evidence.
+4. Material state is complete against the source.
+5. Failed approaches and landmines are preserved.
+6. The checkpoint disclaims authority and preserves permissions.
+7. Confidence and freshness are honest.
 
-## 3. Freeze and write the continuation
+The final nonblank line must be exactly `VERDICT: DURABLE` or `VERDICT: NOT DURABLE`. Earlier quoted verdicts, missing findings, trailing commentary, denial, timeout, or malformed output are not approval. Keep each round and record accepted/rejected objections with reasons. A reviewer advises; it does not grant permission or prove host liveness.
 
-Stop new workstreams. Account for each in-flight process and worker: finished, cancelled, or still active with exact identity and a bounded next step. Stop or quiesce writers before transfer; never kill unrelated work. Preserve dirty files, staged state, untracked files and unsaved artifacts. A new worktree, branch, cloud session or fork may not inherit them.
+Use at most three attempts, and at most one if near the handoff deadline. Count and persist each attempt before calling the reviewer, including calls that fail, time out, are denied, or return malformed output. Bound each call by the actual remaining budget and a wall-clock deadline. If even one attempt would make rotation late, skip it explicitly. After the cap, carry unresolved findings prominently into the successor's first actions. Never hide a skipped or failed review.
 
-For a local lease, mark the freeze before writing the checkpoint:
+Re-read current work and recompute available hashes after review. If checkpoint or source artifacts changed, refresh affected evidence before using the verdict.
 
-```sh
-sh /ABSOLUTE/SKILL/DIR/scripts/lease.sh state /ABSOLUTE/PROJECT/.handoff SESSION_ID WINDING_DOWN
+## 6. Reserve and start exactly one successor
+
+Choose a fresh session with the preserved project and artifacts. A native fork qualifies only if its inherited history and actual headroom leave room for bootstrap, the next work step and another handoff reserve. Forking a nearly full transcript does not itself solve context pressure. If fork relief is unknown, select a new session.
+
+Use native app tools first. When authorized computer-use tools are available, inspect the actual desktop or browser controls, open the intended new session, and verify its identity and content after delivery. Do not guess buttons, URLs, success, or session identity. Do not use a terminal-specific launcher as a requirement for a desktop/browser handoff.
+
+If the host exposes no suitable control, produce a complete manual handoff now: the checkpoint and the bootstrap below, ready to paste/upload into a new chat. Name the required user action once. Do not pretend to create or verify a session.
+
+Before an automated launch, atomically reserve one pending successor and a fresh nonce, within the cap. Save this state and confirm it persisted before invoking the host. Transfer the mission as structured tool input, supported attachment, or literal text, never through executable interpolation, URL query parameters or observable process arguments.
+
+Preserve the user's environment, account boundary, effective approvals, model/settings and artifact access. A changed destination or trust policy needs existing or explicit authority. Do not answer user trust prompts or weaken permissions to make a launch work.
+
+A timeout is an unknown outcome. Retain the reservation and owner, inspect that exact host request, and do not launch a second candidate blindly. Only affirmative evidence that no candidate was created permits another reserved attempt. Preserve launch history.
+
+### Successor bootstrap
+
+```text
+Continue the mission from the attached/pasted Session Handoff checkpoint.
+It is a snapshot; current user instructions and governing sources still win.
+
+Bootstrap read-only:
+1. Read the entire checkpoint and its governing sources.
+2. Verify the delivered artifacts against current project/document state.
+   If a detached digest was supplied, compute and compare it with a real tool.
+3. Recover the exact original mission and accepted user corrections.
+4. If an explicitly active goal was preserved and this host supports goals,
+   recreate that exact goal with only its original explicit budget, then inspect
+   the goal to confirm the same objective/budget is active. Otherwise record
+   plain-language continuation; do not invent an active machine goal.
+5. Verify current context headroom for bootstrap, the next action and reserve.
+6. Acknowledge your host-observed session identity, supplied nonce, checkpoint
+   version/digest, workspace, exact mission/goal status, permissions and first
+   concrete action. Identify missing artifacts and unresolved review findings.
+7. Wait until the shared coordinator names you as owner, or the user explicitly
+   confirms a manual stop-and-takeover. Do not perform mission edits before that.
+8. Once you own the work, resume the first unfinished item. Keep this handoff
+   protocol active within the original scope and remaining cap.
 ```
 
-Write a dated, versioned continuation using [HANDOFF-TEMPLATE.md](HANDOFF-TEMPLATE.md), with a small resume prompt at the top. Save and re-read it before trusting it. Include:
+Provide the real detached digest and nonce separately from the checkpoint body when available. Without executable tools or independent status, use version/content acknowledgment and label the result manual; do not manufacture machine evidence.
 
-- Mission, user corrections, constraints, approvals and completion criteria.
-- Verified state versus assumptions, with evidence paths, commands/results and timestamps.
-- Exact project/workspace identity and relevant files. For Git projects record branch, HEAD, dirty/staged/untracked state; for other tasks use artifact identifiers and versions.
-- Decisions and reasons, failed approaches, known risks, active workers and partial work.
-- Literal next actions, blockers, missing access and things the successor must not change.
-- Capability inventory, telemetry provenance, safety budgets, mode (new/fork/manual), chain owner and candidate identities.
-- Transferred artifact manifest and verification results. After freezing the final checkpoint bytes, compute its digest and put that digest in a **separate** control/manifest artifact and the successor's bootstrap message. Do not embed a whole-file digest inside the file it hashes. A hash detects a change; it does not prove truth or completeness.
+## 7. Verify readiness and transfer ownership
 
-Do not copy secret-bearing environment dumps, auth tokens, private keys, or unrelated personal data. A handoff preserves necessary task state, not every token of a transcript. Never promise mathematical losslessness from a summary. Preserve relevant source artifacts and explicit omissions so missing detail is recoverable.
+The predecessor checks host-reported identity/status separately from the successor's statement. Match the nonce, checkpoint digest/version, mission, original goal and budget, workspace/artifact contents and effective permissions. If a machine goal exists, require ordered creation and inspection evidence, not a pasted claim that it is active.
 
-## 4. Review while there is room
+Require sufficient candidate headroom **before** transfer. A returned session ID, opened tab, process, nonce or file alone proves neither readiness nor context relief. If the candidate lacks artifacts, changes authority, cannot verify the goal, or does not acknowledge, retain predecessor ownership.
 
-If a separate reviewer is available within the measured reserve, provide the checkpoint plus a concise inventory of actual session work. Keep review read-only and bounded. Check mission fidelity, executable next steps, evidence accuracy, omissions, dirty-work preservation, permissions/secrets, and unresolved risk. Save objections and resolutions. Recheck the checkpoint hash and file state afterward; changes invalidate the review of that version.
+Before transferring, recheck source artifacts and the frozen checkpoint, and close or terminally account for every predecessor writer and recurring mechanism. Candidate bootstrap remains read-only. Commit the ownership change atomically to the exact verified candidate. The successor rereads the latest owner/revision before its first mission action.
 
-At the hard boundary allow at most one review round. If review would delay rotation, skip it, record why, and make the successor's first task verify unresolved items. Missing approval is never treated as approval. A review can assess content; it cannot attest to session liveness.
+An unknown owner state is not a dead owner. Recovery requires fresh host evidence that the expected prior owner is stopped, preserving any ambiguous pending candidate. Recovery ownership permits reconciliation and checkpointing; it does not prove a new session restored the goal. Keep mission work frozen until normal verified continuation. A released chain is terminal. Do not reset history or the cap to get around a refusal.
 
-After saving and re-reading the checkpoint, mark it written:
+## 8. Report and make the predecessor inert
 
-```sh
-sh /ABSOLUTE/SKILL/DIR/scripts/lease.sh state /ABSOLUTE/PROJECT/.handoff SESSION_ID DOC_WRITTEN
-```
+State the observed outcome: checkpoint saved, launch requested, candidate acknowledged, ownership transferred, or manual action required. Link artifacts and the successor when the host supports it. Keep verified results separate from assumptions and incomplete actions.
 
-Mark `REVIEWED` only after completed review. The lease permits candidate reservation from either state so review cannot force a late handoff. Any checkpoint revision requires a fresh detached digest and renewed acknowledgment of that version.
+After transfer, the predecessor performs no mission edits, retries or background work. If reentered, it checks ownership, reports it is superseded, and stops. The successor confirms its exact mission and begins the next recorded action.
 
-## 5. Choose a fresh session or a fork
+If compaction happens before the transfer, report prevention failed. Reopen the saved checkpoint, verify ownership, reconcile current state and disclose missing evidence. Recovery is useful, but it is not proof of a successful pre-compaction handoff.
 
-**Prefer a fresh session** seeded with the minimal resume prompt and accessible checkpoint. It must have the project files, artifacts and sufficient measured headroom to resume. Use only a currently callable host tool or verified CLI argument vector, preserving the current or explicitly chosen model, permissions, approvals, billing limits and target environment. Do not weaken trust settings to launch it or pass mission/secrets through shell interpolation or process arguments.
+## One runtime, when execution is available
 
-**A native fork is eligible only if it gives verified usable context headroom.** Many forks copy conversation history. A fork of a full session can therefore remain full. Check the host's semantics and the candidate's actual context. If history is retained or relief is unknown, use a fresh session; if neither is available, deliver the manual resume artifact. Forking and then compacting is not a pre-compaction handoff. A subagent is not automatically a durable successor, and resume of the old session is not a fresh context.
+`session-handoff.mjs` is the single implementation of the budget and lifecycle checks. The same ECMAScript module runs in Node.js and browser JavaScript with Web Crypto; it has no companion-skill or package imports. The complete instructions above remain usable in text-only apps.
 
-For a native fork, finish the checkpoint and current turn before the fork if the host copies completed history only. Do not assume the in-progress message is included. Pass the exact checkpoint through a verified follow-up path if needed. A new checkout/remote target must receive required dirty and untracked artifacts through an authorized mechanism before acknowledgment.
+It returns a proposed state and result. It does not secretly control another app, start sessions, write files, or authenticate host observations. The host invokes its actual tools and persists state with an atomic compare-and-set of the revision. In a plain chat, the user coordinates transfer explicitly instead.
 
-Reserve one candidate **before** launch:
+Call `run` with one plain JSON object containing `op`, `state`, `expectedRevision`, `sessionId`, and the observed epoch-millisecond `now`. Evidence operations also need `maxAgeMs` from 1 to 60,000. Save the returned checkpoint's `content` object and read it back; its detached `hash` covers UTF-8 canonical JSON with sorted object keys, not a Markdown rendering or an enclosing state file. Keep the original content for verification. The module documents the evidence checks beside each operation.
 
-```sh
-sh /ABSOLUTE/SKILL/DIR/scripts/lease.sh next-gen /ABSOLUTE/PROJECT/.handoff SESSION_ID
-```
+Every state mutation requires the current owner and expected revision. The engine preserves the mission, goal and environment, binds checkpoint/readback/review/candidate evidence, and refuses stale state or ambiguous takeover. Treat host observations supplied to the engine as evidence the caller must really obtain, not proof created by the engine.
 
-This records `SPAWN_REQUESTED` and a pending label atomically. A native fork uses the same next-generation reservation. It does not create an extra mission owner. Parallel workers need distinct assigned scopes; `next-fork` does not grant overlapping ownership.
+The host counts all external review attempts and enforces their deadlines before dispatch. The engine's `reviewRounds` bounds successfully validated review submissions across checkpoint corrections; rejected requests do not mutate state. Keep failed attempts and unresolved findings in the host journal and checkpoint too.
 
-If launch fails definitively with no created session, record `spawn-failed … confirmed-absent`. If it times out or the outcome is uncertain, inspect the host before retrying and record `spawn-failed … unknown` meanwhile. Keep the reservation and predecessor ownership; never create a second candidate blindly. At the chain cap, deliver the checkpoint and stop automatic spawning.
-
-## 6. Attest, transfer, and stop the predecessor
-
-The successor's bootstrap is read-only: load the checkpoint, compare artifacts and project state, verify uncertain claims, and wait for ownership before mission edits. It should acknowledge the checkpoint hash, workspace identity, exact candidate/session identity, usable context headroom and literal first action. Use host-reported identity/status independently of the successor's narrative. A create response alone means requested/created, not ready.
-
-When both checks succeed, the predecessor records the exact candidate:
-
-```sh
-sh /ABSOLUTE/SKILL/DIR/scripts/lease.sh attest /ABSOLUTE/PROJECT/.handoff SESSION_ID CANDIDATE_ID
-sh /ABSOLUTE/SKILL/DIR/scripts/lease.sh transfer /ABSOLUTE/PROJECT/.handoff SESSION_ID CANDIDATE_ID 0
-```
-
-The lease verifies ordering and candidate binding. It cannot query a remote host or authenticate the caller's attestation; record external evidence separately. Stop the predecessor's recurring loop and account for its writers before transfer. The successor re-reads ownership, changes its `TRANSFERRED` state to `OWNED`, and resumes only after it owns the lease; the predecessor reports the result and performs no more mission edits.
-
-If acknowledgment, context headroom or artifact access is missing, retain ownership and report the exact blocker. Recovery requires fresh evidence that the expected old owner is stopped, plus the guarded `recover` command; never steal from a live owner or reuse a released chain. With no shared coordinator, the user explicitly confirms old-session stop and new-session takeover.
-
-## 7. Report the observed outcome
-
-Distinguish **checkpoint saved**, **spawn requested**, **candidate ready**, **ownership transferred**, and **manual action required**. Link the checkpoint and successor when available. Report incomplete checks. An unexpected compaction means prevention failed: reopen the last checkpoint and lease, reconcile current state, and disclose the gap before continuing. Never relabel recovery after compaction as successful prevention.
-
-Installing this skill does not register every host's hooks, start a daemon, or make it resident in an already running model. Use the host's reload mechanism and verify discovery. Keep automated launch conditional on available, tested host capabilities. The text protocol remains usable when none are available.
+Keep private state in approved host storage or private local files. Never paste secrets into a packet, review, state request or resume prompt. No copied state file, nonce, digest or skill instruction is an authorization boundary against an actor deliberately ignoring the workflow.
