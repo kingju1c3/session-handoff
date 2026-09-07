@@ -49,6 +49,10 @@ It can use a small preview to orient the new chat, but the full checkpoint remai
 truth. A preview never proves that the new chat has enough context, has access to every file, or
 owns the task.
 
+## Optional Engram memory
+
+When you explicitly ask for Engram and an approved Engram memory backend is available, the skill also recalls relevant decisions and records the work's outcome before the handoff checkpoint is frozen. That gives the next chat useful history while the checkpoint remains the authoritative record for files, permissions, readiness, and ownership. Without the backend, the handoff still works and reports that memory is unavailable.
+
 ## Supported AI apps
 
 The complete instructions work in **Claude**, **ChatGPT and Codex**, and **Gemini Spark**. Each uses the controls its app actually exposes:

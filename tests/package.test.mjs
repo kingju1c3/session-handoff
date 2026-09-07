@@ -51,6 +51,16 @@ test('Gemini Spark guidance remains a manual, checkpoint-first handoff', async (
   assert.match(readme, /Gemini Spark/, 'README names Gemini Spark support');
 });
 
+test('Engram support is optional and cannot replace handoff verification', async () => {
+  const skill = await readFile(join(root, 'SKILL.md'), 'utf8');
+  const readme = await readFile(join(root, 'README.md'), 'utf8');
+  assert.match(skill, /### Optional Engram memory layer/);
+  assert.match(skill, /user explicitly requests Engram/);
+  assert.match(skill, /full checkpoint, candidate verification, ownership, or transfer gates/);
+  assert.match(skill, /memory backend is unavailable in this session/);
+  assert.match(readme, /## Optional Engram memory/);
+});
+
 test('engine imports in a clean process with no installed skills or companion files', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'session-clean-'));
   try {
