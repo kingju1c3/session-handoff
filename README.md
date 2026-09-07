@@ -43,15 +43,17 @@ the work.
    Keep notes for this task:
    my goal, rules, decisions,
    files, progress, and next steps.
-   Help me move to a fresh chat
+   Set up automatic moves if this
+   app supports them. Open a fresh task
    before this one gets too long.
    If you cannot open a new chat,
    give me the notes and a message
    to paste into one.
    ```
 
-3. Continue your task. The AI will prepare notes as you work and explain when you need to
-   open a new chat yourself.
+3. The AI checks the app's controls and prepares the setup and notes. If automatic moves need
+   your review, it explains that step. It must not call setup ready until the app's check has
+   actually run.
 
 You do not need to run code. For help attaching a file, see the guides for
 [ChatGPT](https://help.openai.com/en/articles/8555545-file-uploads-faq) or
@@ -69,12 +71,19 @@ and follow your app's upload guide:
 The option may depend on your account or organization. For a different app, follow its own
 skill-installation guide. If installation is unavailable, use the Quickstart above.
 
+**Automatic moves need a connection to the app.** Installing instructions alone does not make
+that connection. The Codex setup adds checks before tool use and before a chat is shortened.
+Codex requires you to review new checks before they can run; the AI cannot approve them for you.
+See [Codex's guide](https://developers.openai.com/codex/hooks). If those checks cannot run, the AI
+can still open a task now when the app allows it, but cannot promise a later automatic move.
+
 ## How it works
 
 1. **Write the notes.** The AI records your goal, decisions and their reasons, completed work,
    missing information, and the next steps. It checks the notes against the work available.
 2. **Move to a fresh chat.** If the app lets the AI open and check a new chat, it can handle
-   the move using those tools. Otherwise, open a new chat and add the full skill instructions,
+   the move using those tools when you ask. A working automatic check tells it when to start.
+   Otherwise, open a new chat and add the full skill instructions,
    notes, needed files, and the message the AI gives you.
 3. **Check what arrived.** The new chat reads the notes and checks that it can open the files
    it needs. Old attachments may not follow automatically, so you may need to add them again.
@@ -101,6 +110,12 @@ in Node.js and a browser using standard platform APIs, with no third-party runti
 It validates the handoff sequence; the app supplies tools for files, sessions, and coordinated
 state updates. [SKILL.md](SKILL.md) contains the full instructions for the AI.
 
+The same module exports `evaluateCodexHook` and provides a Node-only `--codex-hook` entry point.
+The [Codex setup recipe](SKILL.md#codex-automatic-setup-connect-the-trigger-and-task-controls)
+connects event feedback to native task creation. It preserves existing hooks, requires user
+trust, and arms only a named session. A `PreCompact` block alone does not open a task or prove
+that the AI will resume; the earlier tool check is the normal signal to prepare the handoff.
+
 Run these commands from the repository root:
 
 ```sh
@@ -112,8 +127,10 @@ The build produces `dist/session-handoff.skill` and `dist/session-handoff.zip`, 
 packages with different extensions, plus `dist/session-handoff.md` for attaching or pasting.
 Each package contains `SKILL.md`, `session-handoff.mjs`, this README, and the license.
 
-Local tests check the engine and package. Automatic handoffs still need testing in the actual
-app; these checks do not prove that every desktop or browser app can perform one.
+Keep verification results separate: local engine/CLI tests, an observed trusted hook event,
+native task creation with file and permission checks, and a complete handoff triggered before
+compaction. A successful new-task test proves only the part it exercised. Automatic timing
+still needs a complete test in the actual app; it is not guaranteed across desktop or browser apps.
 
 </details>
 

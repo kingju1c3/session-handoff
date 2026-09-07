@@ -56,7 +56,8 @@ test('engine imports in a clean process with no installed skills or companion fi
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /standalone execution passed/);
     const source = await readFile(engine, 'utf8');
-    assert.doesNotMatch(source, /(?:from\s*['"]|import\s*\(|require\s*\()/,
-      'one engine must not import an implementation or host filesystem');
+    assert.doesNotMatch(source, /(?:from\s*['"]|require\s*\()/, 'no static or companion imports');
+    assert.deepEqual([...source.matchAll(/import\(['"]([^'"]+)['"]\)/g)].map(match => match[1]).sort(),
+      ['node:fs', 'node:fs/promises', 'node:path', 'node:url'], 'only CLI-scoped Node standard library imports');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

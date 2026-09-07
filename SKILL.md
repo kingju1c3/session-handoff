@@ -14,6 +14,8 @@ Everything needed for the workflow is in this file. The bundled `session-handoff
 
 Activate only for a user's handoff/continuity request or an already armed mission. Keep the user's original objective and accepted corrections. Do not replace their mission with the narrower task of making a handoff.
 
+An explicit request to automatically open a fresh task authorizes native task creation for this mission within the existing scope and permissions. Inspect and connect the available trigger and task controls during activation. When native creation is available, perform the handoff through it; do not stop at a manual packet or an offer to open the task. Missing automatic timing does not prevent an authorized immediate native handoff.
+
 Read the current governing instructions and tracker. Record the exact mission, completion criteria, decisions, scope and effective permissions. Preserve an existing active goal's exact objective and explicit token budget. Do not create a goal or invent a budget merely because this skill is active. If the source goal contains a secret, redact the secret and record the secure input needed; do not claim byte-exact preservation of redacted text.
 
 Identify the current app, session, project or document, and permitted destination from current tools or visible UI. Unknown facts remain unknown. A model name does not determine its host's session controls or compaction policy.
@@ -50,6 +52,29 @@ Use the host's effective limits, including reserved output and any earlier app p
 If usage, the boundary, or the next-action cost is missing, inconsistent or stale, save a checkpoint **now**, before further work. Keep it current after every meaningful change. Arrange an early new session instead of waiting for a guessed percentage. Do not repeat automatic launches to compensate for permanently missing telemetry.
 
 A pre-compaction warning is a last chance to use an already prepared checkpoint. It may not permit blocking or enough time for a fresh summary. No skill can guarantee timing on a host that silently compacts without exposing advance control; label that host's continuation as best effort, with a manual new-session path.
+
+### Codex automatic setup: connect the trigger and task controls
+
+The lifecycle engine alone does not monitor Codex or open tasks. For an authorized automatic handoff, configure the bundled hook adapter and use the native task operations below. A hook decision, a registered command, and a created task are separate evidence.
+
+1. Inspect the active hook sources, installed module, Node executable and exact current session identity. Preserve all existing hook definitions. Resolve executable and module paths on the actual machine; quote paths correctly. Do not install a second copy of an equivalent handler.
+2. Register synchronous command handlers for `PreToolUse` with matcher `.*` and `PreCompact` with matcher `auto|manual`. Both run the resolved Node executable with the installed `session-handoff.mjs --codex-hook`, `timeout: 5`, and `additionalContextLimit: 1200`. Codex supplies the actual event JSON on stdin. Do not synthesize live-event evidence by invoking this command yourself.
+
+   Command shape; replace both placeholder paths with verified absolute paths:
+
+   ```sh
+   "/absolute/path/to/node" "/absolute/path/to/session-handoff.mjs" --codex-hook
+   ```
+
+3. Save and read back an initial complete checkpoint before arming. Create the current session's private control file at `~/.codex/session-handoff/<session_id>.json`, using its observed identifier, directory mode `0700` and file mode `0600`. Use `schema: 1`, exact `sessionId`, canonical `cwd`, `armed: true`, and the absolute `checkpointPath`. The checkpoint must exist as a readable regular file; control, checkpoint and transcript paths must not traverse symlinks. Supply positive `handoffReserveTokens` and a bounded `maxNextStepTokens`; include `boundaryTokens` only when the actual boundary is known. Never arm every task or derive a boundary from a guessed universal percentage.
+4. Have the user review the exact new or changed hook definitions through Codex's supported trust flow (`/hooks` in the CLI). Never approve trust on the user's behalf, edit trust records, bypass hook trust, or weaken policy. A definition awaiting review is registered but inactive. Follow the [official hook documentation](https://developers.openai.com/codex/hooks) for current discovery and trust behavior.
+5. Observe an actual matching event from the armed session and its effect on a harmless bounded call. Until trust and execution are observed, report `configured; hook execution unverified`. A direct CLI fixture tests the adapter only. Record evidence for trigger execution, native task creation, file access, goal restoration, and ownership transfer separately.
+
+For a verified, armed root session, missing/stale token evidence or an unknown boundary requests an early handoff. The first eligible call in a turn receives feedback: an ordinary call with a valid turn ID is denied; a native handoff call remains available. Later calls remain available for checkpoint work. Without a valid turn ID, the adapter supplies feedback without denial or a per-turn marker. This is cooperative prompting, not a security lock: pause ordinary mission work on the signal even when a later call would be allowed. Do not replay the denied large call, disable the check to continue work, or repeatedly launch tasks because telemetry stays unavailable.
+
+The `PreCompact` handler returns `continue: false` to stop compaction only for a verified, armed root session. If root identity cannot be verified, including a missing or unreadable transcript, the adapter emits advisory feedback only: no task-creation instruction, marker, or compaction block. Even a compaction block does not prove that Codex will resume the model, invoke a `Stop` hook, or open a task. The earlier `PreToolUse` feedback is the normal route to an active handoff; if only the final compaction block occurs, report that blocked state and use the saved checkpoint for recovery. Some tool paths bypass hooks, so retain the pre-action checks in this section.
+
+Bind observations to the actual task, not just its working directory. Codex subagent hook events can carry the parent's `session_id`; reconcile transcript and task identity before treating an event as root-task evidence. After transfer, disarm the predecessor's control and prepare a new exact-session control for the successor under the same authorized mission and remaining attempt cap. Do not reset the history or claim new hook trust automatically.
 
 ## 3. Wind down and preserve the work
 
@@ -180,6 +205,18 @@ Preserve the user's environment, account boundary, effective approvals, model/se
 
 A timeout is an unknown outcome. Retain the reservation and owner, inspect that exact host request, and do not launch a second candidate blindly. Only affirmative evidence that no candidate was created permits another reserved attempt. Preserve launch history.
 
+### Codex native task recipe
+
+On handoff feedback, stop ordinary work and complete steps 3–5 above. Then use the current app's exposed versions of these operations; discover them rather than assuming another app exposes the same names:
+
+1. Call `mcp__codex_app__list_projects` before creating a project task. Select the actual project and preserve required artifact access. Follow an explicit request to keep the saved checkout; otherwise use the tool's Git/worktree rules and include current working state only through supported options. A worktree does not itself deliver untracked files.
+2. Reserve one candidate, then call `mcp__codex_app__create_thread` with the complete read-only bootstrap and an accessible durable checkpoint. Preserve the existing permitted environment, account and approvals; omit model overrides unless the user requested them. Use a projectless target only when appropriate for the actual mission. Prefer fresh creation; `mcp__codex_app__fork_thread` inherits completed history and omits the active unfinished turn, so it qualifies only with verified room and a complete checkpoint.
+3. Creation is asynchronous. Use the returned real `threadId` and `hostId` with `mcp__codex_app__wait_threads`; a queued `clientThreadId` is not a usable thread identifier. Resolve pending setup through app status/listing, and reconcile ambiguous creation before retrying.
+4. Use `mcp__codex_app__read_thread` to inspect the actual acknowledgment. Use `mcp__codex_app__send_message_to_thread` for missing read-only startup checks or a corrected checkpoint. Wait with cursors and bounded output; do not poll unchanged history. Require independent identity/status, matching checkpoint, readable files, exact goal/budget, effective permissions and sufficient room as in step 7.
+5. Quiesce all predecessor writers and perform the guarded ownership transfer. Send the candidate its authorized continuation through `mcp__codex_app__send_message_to_thread` only after ownership is established; the successor must reread it before mission edits. Without a shared atomic coordinator, keep the candidate read-only until the explicit manual stop-and-takeover. Do not claim a completed automatic transfer merely because native creation worked.
+
+An immediate native-task probe can establish creation, accessible files and matching policy. It does not test a context-triggered handoff. Record that distinction even if a new task's measured input is smaller than the old task's: smaller input does not establish an unknown compaction boundary.
+
 ### Successor bootstrap
 
 ```text
@@ -227,9 +264,9 @@ If compaction happens before the transfer, report prevention failed. Reopen the 
 
 ## One runtime, when execution is available
 
-`session-handoff.mjs` is the single implementation of the budget and lifecycle checks. The same ECMAScript module runs in Node.js and browser JavaScript with Web Crypto; it has no companion-skill or package imports. The complete instructions above remain usable in text-only apps.
+`session-handoff.mjs` is the single implementation of the budget and lifecycle checks, including `evaluateCodexHook`. Its core ECMAScript exports run in Node.js and browser JavaScript with Web Crypto. The Node-only `--codex-hook` entry point connects actual Codex events to feedback using the private session control. The complete instructions above remain usable in text-only apps.
 
-It returns a proposed state and result. It does not secretly control another app, start sessions, write files, or authenticate host observations. The host invokes its actual tools and persists state with an atomic compare-and-set of the revision. In a plain chat, the user coordinates transfer explicitly instead.
+The `run` API returns proposed state and a result; its caller persists lifecycle state with atomic compare-and-set of the revision. The hook entry point reads local event/control evidence and tracks its per-turn signal. Neither interface creates tasks or authenticates host observations: the agent must invoke the real app tools and verify their results. In a plain chat, the user coordinates transfer explicitly instead.
 
 Call `run` with one plain JSON object containing `op`, `state`, `expectedRevision`, `sessionId`, and the observed epoch-millisecond `now`. Evidence operations also need `maxAgeMs` from 1 to 60,000. Save the returned checkpoint's `content` object and read it back; its detached `hash` covers UTF-8 canonical JSON with sorted object keys, not a Markdown rendering or an enclosing state file. Keep the original content for verification. The module documents the evidence checks beside each operation.
 

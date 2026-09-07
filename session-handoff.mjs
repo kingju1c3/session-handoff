@@ -1,5 +1,6 @@
 /* Session Handoff: one dependency-free module for browser and Node hosts.
- * Cooperative JSON transitions, NOT a lock, host adapter, scheduler, or launcher.
+ * run() provides cooperative JSON transitions, not a lock or launcher.
+ * The optional Codex hook CLI at the end reads host events and emits feedback.
  * Persist each returned mutation using shared atomic compare-and-set of BOTH
  * revision and state before acting. Caller evidence is an assertion, not host
  * authentication. No input can grant additional permissions or create a goal.
@@ -400,3 +401,174 @@ export async function resumePrompt(input) {
     `Review records, including unresolved objections: ${canonical(state.reviews)}\n` +
     `If the host cannot expose the required evidence or shared atomic coordination, stop after read-only bootstrap and request explicit manual takeover with the predecessor stopped. No automatic transfer is established.`;
 }
+
+const HANDOFF_TOOLS = new Set(['create_thread', 'fork_thread', 'read_thread', 'wait_threads', 'send_message_to_thread', 'list_threads', 'list_projects']
+  .map(name => 'mcp__codex_app__' + name));
+const safeSession = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+const hookFeedback = (event, message, deny = false) => event.hook_event_name === 'PreCompact'
+  ? { continue: false, stopReason: message, systemMessage: message }
+  : { hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: message,
+    ...(deny ? { permissionDecision: 'deny', permissionDecisionReason: message } : {}) } };
+
+/** Pure Codex hook policy. The CLI supplies actual bounded transcript readings.
+ * marker only bounds feedback within a turn; it is NOT an ownership lock.
+ * Native creation remains an agent tool call, never a shell/private-API call.
+ */
+export function evaluateCodexHook(input) {
+  const { event, control, telemetry = null, marker = null, now } = copyJson(input);
+  const idle = { output: {}, marker: null };
+  need(object(event), 'hook event required');
+  if (!['PreToolUse', 'PreCompact'].includes(event.hook_event_name) || control === null || control?.armed === false) return idle;
+  need(object(control) && control.schema === 1 && control.armed === true && safeSession(control.sessionId) &&
+    text(control.cwd) && text(control.checkpointPath) && control.checkpointPath.length <= 2048 &&
+    integer(control.handoffReserveTokens, 1) && integer(control.maxNextStepTokens) && integer(now, 1), 'invalid armed hook control');
+  if (event.session_id !== control.sessionId || event.cwd !== control.cwd || telemetry?.unrelated === true) return idle;
+  if (telemetry?.rootIdentityVerified !== true || telemetry.sessionId !== control.sessionId) return {
+    output: { systemMessage: 'Session Handoff could not verify the exact root transcript identity. No root handoff or compaction block was requested.' }, marker: null };
+  if (Object.hasOwn(control, 'boundaryTokens')) need(integer(control.boundaryTokens, 1), 'invalid confirmed hook boundary');
+  const instruction = 'Session Handoff is armed for this exact session. Stop expanding mission work. Refresh the complete checkpoint at ' +
+    JSON.stringify(control.checkpointPath) + '. Check ownership and any pending reservation first; never duplicate a pending candidate. When no candidate is reserved, use the supported native codex_app create_thread tool, seed it with the full checkpoint, verify readiness and exact goal/permissions, and transfer ownership before continuing. Use fork_thread only with verified context relief. Do not call private APIs or treat a created window as verified transfer.';
+  if (event.hook_event_name === 'PreCompact') return { output: hookFeedback(event, 'Compaction stopped before context loss. ' + instruction), marker: null };
+  const context = telemetry && !telemetry.error ? { sessionId: telemetry.sessionId, source: 'exact Codex transcript token_count',
+    observedAt: telemetry.observedAt, usedTokens: telemetry.usedTokens, effectiveWindowTokens: telemetry.windowTokens,
+    compactionBoundariesTokens: control.boundaryTokens === undefined ? [] : [control.boundaryTokens],
+    nextStepTokens: control.maxNextStepTokens, handoffReserveTokens: control.handoffReserveTokens } : null;
+  const decision = contextDecision(context, { now, maxAgeMs: 60000 }, control.sessionId);
+  if (decision.decision === 'continue') return idle;
+  const message = (decision.decision === 'handoff' ? 'Measured context requires handoff before the next tool. ' :
+    'Actual context boundary or fresh telemetry is unavailable; request an early handoff. ') + instruction;
+  const turn = safeSession(event.turn_id) ? event.turn_id : null;
+  const already = turn !== null && marker?.schema === 1 && marker.sessionId === control.sessionId && marker.cwd === control.cwd && marker.lastNotifiedTurn === turn;
+  if (already) return idle; // Permit checkpoint preparation after one denial, cooperatively.
+  const native = HANDOFF_TOOLS.has(event.tool_name);
+  return { output: hookFeedback(event, message, !native && turn !== null), marker: turn === null ? null : {
+    schema: 1, sessionId: control.sessionId, cwd: control.cwd, lastNotifiedTurn: turn } };
+}
+
+async function codexHookCli() {
+  // Imports live exclusively inside the optional Node CLI; browser imports stay inert.
+  const { pathToFileURL } = await import('node:url');
+  const fs = await import('node:fs/promises');
+  if (!process.argv[1] || import.meta.url !== pathToFileURL(await fs.realpath(process.argv[1])).href) return;
+  const { constants } = await import('node:fs');
+  const path = await import('node:path');
+  let event = null;
+  let output = {};
+  let verifiedRoot = false;
+  async function noLinks(file) {
+    need(path.isAbsolute(file), 'absolute hook path required');
+    const parsed = path.parse(file);
+    let current = parsed.root;
+    for (const part of file.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
+      need(part !== '.' && part !== '..', 'unsafe hook path');
+      current = path.join(current, part);
+      need(!(await fs.lstat(current)).isSymbolicLink(), 'hook symlink refused');
+    }
+  }
+  async function openRegular(file, limit, privateFile = false) {
+    await noLinks(file);
+    const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
+    try {
+      const stat = await handle.stat();
+      need(stat.isFile() && stat.size <= limit, 'invalid or oversized hook file');
+      if (privateFile) need((stat.mode & 0o077) === 0 && (!process.getuid || stat.uid === process.getuid()), 'hook control must be private and owned');
+      return { handle, stat };
+    } catch (error) { await handle.close(); throw error; }
+  }
+  async function readJson(file, limit, privateFile = false) {
+    const { handle } = await openRegular(file, limit, privateFile);
+    try { return JSON.parse(await handle.readFile('utf8')); } finally { await handle.close(); }
+  }
+  async function transcript(file, sessionId) {
+    if (typeof file !== 'string' || !path.isAbsolute(file)) return { error: true };
+    let opened;
+    let rootIdentityVerified = false;
+    try {
+      opened = await openRegular(file, 256 * 1024 * 1024);
+      const head = Buffer.alloc(Math.min(opened.stat.size, 65536));
+      await opened.handle.read(head, 0, head.length, 0);
+      const first = head.toString('utf8').split('\n').find(line => line.trim());
+      const meta = JSON.parse(first || 'null');
+      if (meta?.type !== 'session_meta' || meta.payload?.id !== sessionId) return { unrelated: true };
+      if (meta.payload.source === 'subagent' || object(meta.payload.source) && Object.hasOwn(meta.payload.source, 'subagent')) return { unrelated: true };
+      if (typeof meta.payload.source !== 'string' || !text(meta.payload.source)) return { error: true };
+      rootIdentityVerified = true;
+      const start = Math.max(0, opened.stat.size - 1024 * 1024);
+      const tail = Buffer.alloc(opened.stat.size - start);
+      await opened.handle.read(tail, 0, tail.length, start);
+      const lines = tail.toString('utf8').split('\n');
+      if (start > 0) lines.shift();
+      let latest = null;
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const row = JSON.parse(line);
+        if (row.type === 'session_meta' && row.payload?.id !== sessionId) return { unrelated: true };
+        if (row.type === 'event_msg' && row.payload?.type === 'token_count') latest = row;
+      }
+      const info = latest?.payload?.info;
+      const usage = info?.last_token_usage;
+      need(integer(usage?.input_tokens) && (usage.output_tokens === undefined || integer(usage.output_tokens)), 'resident token usage unavailable');
+      const observedAt = Date.parse(latest.timestamp);
+      need(integer(observedAt, 1) && integer(info.model_context_window, 1), 'context timestamp or window unavailable');
+      return { sessionId, rootIdentityVerified, observedAt, usedTokens: usage.input_tokens + (usage.output_tokens ?? 0),
+        windowTokens: info.model_context_window };
+    } catch { return { error: true, rootIdentityVerified, sessionId }; }
+    finally { if (opened) await opened.handle.close(); }
+  }
+  try {
+    const chunks = []; let size = 0;
+    for await (const chunk of process.stdin) {
+      size += chunk.length; need(size <= 1024 * 1024, 'hook input too large'); chunks.push(chunk);
+    }
+    event = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    need(object(event), 'invalid hook event');
+    if (!['PreToolUse', 'PreCompact'].includes(event.hook_event_name) || !safeSession(event.session_id)) {
+      process.stdout.write('{}'); return;
+    }
+    const home = await fs.realpath(process.env.HOME || '');
+    const dir = path.join(home, '.codex', 'session-handoff');
+    const controlPath = path.join(dir, event.session_id + '.json');
+    let control;
+    try { control = await readJson(controlPath, 65536, true); }
+    catch (error) { if (error.code === 'ENOENT') { process.stdout.write('{}'); return; } throw error; }
+    if (control?.armed === false) { process.stdout.write('{}'); return; }
+    need(safeSession(control?.sessionId), 'invalid control session');
+    if (control.sessionId !== event.session_id) { process.stdout.write('{}'); return; }
+    need(path.isAbsolute(control.cwd) && path.isAbsolute(event.cwd) && path.isAbsolute(control.checkpointPath), 'absolute control paths required');
+    control.cwd = await fs.realpath(control.cwd);
+    event.cwd = await fs.realpath(event.cwd);
+    if (control.cwd !== event.cwd) { process.stdout.write('{}'); return; }
+    const telemetry = await transcript(event.transcript_path, event.session_id);
+    if (telemetry.unrelated) { process.stdout.write('{}'); return; }
+    verifiedRoot = telemetry.rootIdentityVerified === true && telemetry.sessionId === event.session_id;
+    if (!verifiedRoot) {
+      process.stdout.write(JSON.stringify(evaluateCodexHook({ event, control, telemetry, now: Date.now() }).output)); return;
+    }
+    // Existing checkpoint must be readable and regular; never dereference links.
+    const checkpoint = await openRegular(control.checkpointPath, MAX_BYTES);
+    await checkpoint.handle.close();
+    const markerPath = path.join(dir, event.session_id + '.marker.json');
+    let marker = null;
+    try { marker = await readJson(markerPath, 8192, true); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const evaluated = evaluateCodexHook({ event, control, telemetry, marker, now: Date.now() });
+    output = evaluated.output;
+    if (evaluated.marker) {
+      // Atomic replacement prevents partial JSON. Concurrent notifications can
+      // still duplicate; this is a cooperative feedback guard, not a lock.
+      const temp = path.join(dir, event.session_id + '.' + globalThis.crypto.randomUUID() + '.tmp');
+      try {
+        await fs.writeFile(temp, JSON.stringify(evaluated.marker), { mode: 0o600, flag: 'wx' });
+        await fs.rename(temp, markerPath);
+      } finally { await fs.unlink(temp).catch(() => {}); }
+    }
+  } catch {
+    const message = 'Session Handoff hook could not validate its exact-session control, checkpoint, or feedback marker. Repair that session setup and preserve the checkpoint before continuing; automatic handoff is not verified.';
+    output = verifiedRoot && event && ['PreToolUse', 'PreCompact'].includes(event.hook_event_name)
+      ? { ...hookFeedback(event, message), systemMessage: message }
+      : { systemMessage: 'Session Handoff could not validate the hook setup or root identity; no root handoff or compaction block was requested.' };
+  }
+  process.stdout.write(JSON.stringify(output));
+}
+
+if (typeof process !== 'undefined' && process.versions?.node && process.argv?.[2] === '--codex-hook') await codexHookCli();
