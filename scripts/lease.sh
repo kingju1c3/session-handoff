@@ -1,350 +1,255 @@
 #!/bin/sh
-# session-handoff — ownership lease + append-only journal.
+# session-handoff — cooperative single-writer lease, POSIX + Python 3 stdlib.
+# The host/model verifies remote status and attestation; this CLI records its
+# observation and enforces ordering. Possession of a session ID is not auth.
 #
-# Pure POSIX sh + python3, mkdir-based locking (POSIX guarantees mkdir is
-# atomic; flock does not exist everywhere). No platform dependency at all.
-#
-# The lease is what makes a handoff an ownership TRANSFER rather than a
-# polite suggestion. Exactly one session owns the mission at a time; every
-# other session must refuse to do mission work. It lives on disk so it
-# survives a crash.
-#
-# LIVENESS IS NOT CHECKED HERE, DELIBERATELY. A session on these surfaces
-# has no local PID to test with `kill -0` — its liveness is a server fact
-# (session_status / connection_status from the get_session tool), which
-# only the calling MODEL can query, since a shell script cannot call an
-# MCP tool. So `recover` does NOT try to determine liveness itself: the
-# model must call get_session on the recorded owner FIRST and only invoke
-# `recover` once it has confirmed from that result that the owner is not
-# running. `ownerPid` is still recorded (best-effort, usually 0) for audit
-# and debugging, never as a liveness check.
-#
-# SESSION LABELS: every session in a chain has a label "<generation>.<fork>".
-# The root is 1.1. Its successor is 2.1, then 3.1 — generation is depth down
-# the chain. A second, parallel successor spawned at the same depth is 2.2,
-# then 2.3 — fork is width. So a chain that hands off twice and forks once
-# reads 1.1 -> 2.1 -> 2.2 (parallel sibling) -> 3.1. Depth is capped by `cap`
-# (default 5) and width by `forkCap` (default 2), because forks multiply live
-# sessions and therefore cost.
-#
-# Usage:
-#   lease.sh init      <dir> <session-id> <pid> [cap] [forkCap]
-#                                                       -> prints chainId; creates 1.1
-#   lease.sh get       <dir>                            -> prints LEASE.json
-#   lease.sh label     <dir>                            -> prints current label, e.g. 2.1
-#   lease.sh owns      <dir> <session-id>               -> exit 0 owner, 1 not owner, 2 no lease
-#   lease.sh state     <dir> <session-id> <STATE>       -> transition state (owner only)
-#   lease.sh next-gen  <dir> <session-id>               -> claim next generation atomically
-#                                                          prints label (e.g. 2.1)
-#                                                          exit 3 if depth cap reached
-#   lease.sh next-fork <dir> <session-id>               -> claim a parallel sibling at the
-#                                                          current generation; prints label
-#                                                          (e.g. 2.2); exit 3 if forkCap hit
-#   lease.sh transfer  <dir> <session-id> <new-sid> <new-pid>  -> hand ownership over
-#   lease.sh release   <dir> <session-id>               -> mark released, own nothing
-#   lease.sh recover   <dir> <session-id> <pid>         -> take over a lease whose owner is
-#                                                          confirmed dead (see LIVENESS note above —
-#                                                          this script no longer verifies that itself)
-#   lease.sh spawn-failed <dir> <session-id>            -> refund a generation after a failed
-#                                                          spawn (state must be SPAWN_REQUESTED)
-#   lease.sh journal   <dir>                            -> print JOURNAL.jsonl
-#
-# Exit codes: 0 ok · 1 not owner · 2 no lease / bad args · 3 generation cap reached
-#             4 could not acquire lock
+# init <dir> <sid> <pid> [cap=5] [forkCap=2]
+# get|label|journal <dir>; owns <dir> <sid>
+# state <dir> <sid> <STATE>
+# next-gen <dir> <sid>                  reserve one successor, print its label
+# attest <dir> <sid> <candidate-sid>    after verifying host evidence
+# transfer <dir> <sid> <candidate-sid> <pid>
+# spawn-failed <dir> <sid> <confirmed-absent|unknown>
+# recover <dir> <new-sid> <pid> <expected-owner> confirmed-stopped
+# release <dir> <sid>
+# next-fork is retained only to explain that a native fork uses next-gen;
+# parallel workers have separate scopes, never a second owner of this lease.
+# Exit: 0 success, 1 ownership/state conflict, 2 bad input, 3 cap, 4 lock timeout.
 set -eu
+umask 077
+exec python3 - "$@" <<'PY'
+import fcntl
+import json
+import os
+import stat
+import sys
+import time
+import uuid
 
-STALE_SECS=30
-# The lock is held for milliseconds (one python read-modify-write), so poll finely.
-# Coarse polling starves contending claimants and refuses work that should have
-# succeeded. 100 tries x 0.1s = 10s ceiling, then fail closed.
-LOCK_TRIES=100
-LOCK_SLEEP=0.1
 
-die() { echo "lease.sh: $1" >&2; exit "${2:-2}"; }
+def fail(message, code=2):
+    print("lease.sh: " + message, file=sys.stderr)
+    raise SystemExit(code)
 
-lock_acquire() {
-  _lock="$1/.lock"
-  _i=0
-  while [ "$_i" -lt "$LOCK_TRIES" ]; do
-    if mkdir "$_lock" 2>/dev/null; then
-      echo $$ > "$_lock/pid"
-      return 0
-    fi
-    _holder=""
-    if [ -f "$_lock/pid" ]; then
-      _holder=$(cat "$_lock/pid" 2>/dev/null || echo "")
-    fi
-    if [ -n "$_holder" ]; then
-      # A nonempty pid exists: trust it completely. Never age-steal from a
-      # holder that is still alive — that is a lost update, not a stale lock.
-      if ! kill -0 "$_holder" 2>/dev/null; then
-        rm -rf "$_lock" 2>/dev/null || true
-        if [ -d "$_lock" ]; then
-          # rm failed (e.g. raced another claimant) — don't spin forever on it.
-          sleep "$LOCK_SLEEP"
-          _i=$((_i+1))
-        fi
-        continue
-      fi
-      # Holder pid present and alive: do NOT age-steal. Just keep polling.
-      sleep "$LOCK_SLEEP"
-      _i=$((_i+1))
-      continue
-    fi
-    # No usable pid (no file, empty, or unreadable): mkdir happened but the
-    # writer died before the pid landed. Only here does the age check apply —
-    # an empty pid file must not hold the lock forever.
-    _age=$(python3 - "$_lock" <<'PY' 2>/dev/null || echo 0
-import os,sys,time
-try: print(int(time.time()-os.path.getmtime(sys.argv[1])))
-except Exception: print(0)
+
+def identity(value):
+    if not value.strip() or len(value) > 512 or any(ord(c) < 32 for c in value):
+        fail("session IDs must be nonempty, at most 512 characters, without control characters")
+    return value
+
+
+def integer(value, minimum=0):
+    if len(value) > 10 or not value.isascii() or not value.isdecimal() or not minimum <= int(value) <= 2147483647:
+        fail("expected an integer between %s and 2147483647" % minimum)
+    return int(value)
+
+
+args = sys.argv[1:]
+if len(args) < 2 or not args[1]:
+    fail("expected a command and state directory; see script header")
+command, directory, *values = args
+arities = {"init": (2, 4), "get": (0, 0), "label": (0, 0), "journal": (0, 0),
+           "owns": (1, 1), "state": (2, 2), "next-gen": (1, 1), "next-fork": (1, 1),
+           "attest": (2, 2), "transfer": (3, 3), "release": (1, 1),
+           "recover": (4, 4), "spawn-failed": (2, 2)}
+if command not in arities or not arities[command][0] <= len(values) <= arities[command][1]:
+    fail("invalid command or arguments; see script header")
+if values:
+    identity(values[0])
+if command == "init":
+    pid = integer(values[1])
+    cap = integer(values[2], 1) if len(values) > 2 else 5
+    forkcap = integer(values[3], 1) if len(values) > 3 else 2
+if command == "transfer":
+    identity(values[1])
+    pid = integer(values[2])
+if command == "recover":
+    pid = integer(values[1])
+    identity(values[2])
+    if values[3] != "confirmed-stopped":
+        fail("recover requires fresh host evidence and the literal confirmed-stopped")
+
+
+try:
+    if command == "init":
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+    # Refuse a symlink as the state directory and pin its inode for all I/O.
+    root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    info = os.fstat(root)
+    if info.st_uid != os.geteuid():
+        fail("state directory must belong to the current user")
+    if command == "init":
+        os.fchmod(root, 0o700)
+    elif stat.S_IMODE(info.st_mode) & 0o077:
+        fail("state directory must be private (chmod 700 before use)")
+
+    def open_regular(name, flags, mode=0o600):
+        fd = os.open(name, flags | os.O_NOFOLLOW | os.O_NONBLOCK, mode, dir_fd=root)
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid():
+            os.close(fd)
+            fail("%s must be an owned regular file with one link" % name)
+        if stat.S_IMODE(info.st_mode) & 0o077:
+            os.close(fd)
+            fail("%s must be private (chmod 600 before use)" % name)
+        return fd
+
+    # Keep the lock inode. Deleting it or stealing an aged mkdir lock can let
+    # two claimants lock different inodes; the kernel releases flock on exit.
+    lock = open_regular(".lock", os.O_RDWR | os.O_CREAT)
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                fail("could not acquire lease lock", 4)
+            time.sleep(0.1)
+
+    def read_json():
+        with os.fdopen(open_regular("LEASE.json", os.O_RDONLY)) as stream:
+            result = json.load(stream)
+        if not isinstance(result, dict):
+            fail("invalid lease object")
+        return result
+
+    if command == "init":
+        try:
+            os.stat("LEASE.json", dir_fd=root, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            fail("lease already exists; inspect it instead of overwriting")
+        data = {"chainId": str(uuid.uuid4()), "generation": 1, "fork": 1, "label": "1.1",
+                "cap": cap, "forkCap": forkcap, "ownerSessionId": values[0],
+                "ownerPid": pid, "state": "OWNED", "lineage": ["1.1"]}
+        output = data["chainId"]
+    elif command == "journal":
+        try:
+            fd = open_regular("JOURNAL.jsonl", os.O_RDONLY)
+        except FileNotFoundError:
+            print("(no journal)")
+        else:
+            with os.fdopen(fd) as stream:
+                sys.stdout.write(stream.read())
+        raise SystemExit(0)
+    else:
+        data = read_json()
+        output = None
+
+    if command == "get":
+        print(json.dumps(data, indent=2))
+        raise SystemExit(0)
+    if command == "label":
+        print(data["label"])
+        raise SystemExit(0)
+    if command == "owns":
+        raise SystemExit(0 if data.get("ownerSessionId") == values[0]
+                         and data.get("state") != "RELEASED" else 1)
+    if command not in {"init", "recover"} and data.get("ownerSessionId") != values[0]:
+        fail("not owner", 1)
+    pending = data.get("pendingSuccessor")
+
+    if command == "state":
+        new = values[1]
+        # Ownership/candidate states have dedicated commands; generic state
+        # updates must not bypass their guards.
+        transitions = {"OWNED": {"WINDING_DOWN", "BLOCKED"},
+                       "TRANSFERRED": {"OWNED", "WINDING_DOWN", "BLOCKED"},
+                       "WINDING_DOWN": {"DOC_WRITTEN", "BLOCKED"},
+                       "DOC_WRITTEN": {"REVIEWED", "WINDING_DOWN", "BLOCKED"},
+                       "REVIEWED": {"WINDING_DOWN", "BLOCKED"},
+                       "SPAWN_REQUESTED": {"BLOCKED"}, "ATTESTED": {"BLOCKED"},
+                       "BLOCKED": {"SPAWN_REQUESTED"} if pending else {"WINDING_DOWN"}}
+        if new in {"ATTESTED", "TRANSFERRED", "RELEASED"} or new not in transitions:
+            fail("use the dedicated command for ownership states, or a valid state")
+        if new != data["state"] and new not in transitions.get(data["state"], set()):
+            fail("invalid transition %s -> %s" % (data["state"], new), 1)
+        data["state"] = new
+    elif command == "next-gen":
+        if pending or data["state"] not in {"DOC_WRITTEN", "REVIEWED"}:
+            fail("write the document first; only one pending successor is allowed", 1)
+        # A deadline may skip review with a reason in the document, never the
+        # durable document itself.
+        generation = data["generation"] + 1
+        if generation > data["cap"]:
+            fail("generation cap reached", 3)
+        output = "%s.1" % generation
+        data["pendingSuccessor"] = {"label": output, "sessionId": None}
+        data["state"] = "SPAWN_REQUESTED"
+    elif command == "next-fork":
+        fail("native forks use next-gen; parallel workers need separate scopes, not another mission owner")
+    elif command == "attest":
+        candidate = identity(values[1])
+        if not pending or data["state"] != "SPAWN_REQUESTED" or candidate == values[0]:
+            fail("attest requires a pending, distinct successor in SPAWN_REQUESTED", 1)
+        if pending.get("sessionId") not in {None, candidate}:
+            fail("candidate differs from the previously recorded successor", 1)
+        pending["sessionId"] = candidate
+        data["state"] = "ATTESTED"
+    elif command == "transfer":
+        if data["state"] != "ATTESTED" or not pending or pending.get("sessionId") != values[1]:
+            fail("transfer requires the exact attested successor", 1)
+        data["previousOwnerSessionId"] = data["ownerSessionId"]
+        data["ownerSessionId"], data["ownerPid"] = values[1], pid
+        data["label"] = pending["label"]
+        data["generation"], data["fork"] = map(int, pending["label"].split("."))
+        data["lineage"].append(pending["label"])
+        del data["pendingSuccessor"]
+        data["state"] = "TRANSFERRED"
+    elif command == "spawn-failed":
+        outcome = values[1]
+        if outcome not in {"confirmed-absent", "unknown"}:
+            fail("spawn outcome must be confirmed-absent or unknown")
+        if not pending or data["state"] not in {"SPAWN_REQUESTED", "BLOCKED"}:
+            fail("no pending spawn to reconcile", 1)
+        if outcome == "confirmed-absent":
+            del data["pendingSuccessor"]
+        data["state"] = "BLOCKED"
+    elif command == "release":
+        if pending:
+            fail("reconcile the pending successor before releasing the chain", 1)
+        data["state"], data["ownerSessionId"], data["ownerPid"] = "RELEASED", None, 0
+    elif command == "recover":
+        if data.get("state") == "RELEASED" or not data.get("ownerSessionId"):
+            fail("a released chain is terminal; create a new chain directory", 1)
+        if data["ownerSessionId"] != values[2] or values[0] == values[2]:
+            fail("recorded owner changed, or recovery identity is unchanged", 1)
+        if pending and pending.get("sessionId") == values[0]:
+            fail("recovering as the pending candidate needs explicit reconciliation first", 1)
+        data["previousOwnerSessionId"] = data["ownerSessionId"]
+        data["ownerSessionId"], data["ownerPid"] = values[0], pid
+        data["state"] = "BLOCKED" if pending else "OWNED"
+
+    # Validate the journal before committing: a planted symlink must not
+    # redirect records or allow a state change followed by a known bad append.
+    journal = open_regular("JOURNAL.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+    data["updatedAt"] = int(time.time())
+    event = {"ts": data["updatedAt"], "event": command, "sessionId": values[0],
+             "state": data["state"], "label": data["label"], "args": values[1:]}
+    temp = ".LEASE.%s.tmp" % uuid.uuid4()
+    try:
+        with os.fdopen(open_regular(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL), "w") as stream:
+            json.dump(data, stream, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, "LEASE.json", src_dir_fd=root, dst_dir_fd=root)
+        os.fsync(root)
+        with os.fdopen(journal, "a") as stream:
+            stream.write(json.dumps(event, separators=(",", ":")) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+    finally:
+        try:
+            os.unlink(temp, dir_fd=root)
+        except FileNotFoundError:
+            pass
+    if output is not None:
+        print(output)
+except (OSError, ValueError, KeyError, TypeError) as error:
+    # A crash/I/O error between the lease write and append may omit a journal
+    # record. A failed command never implies that the mutation rolled back.
+    fail("%s; inspect LEASE.json before retrying a mutation" % error)
 PY
-)
-    if [ "${_age:-0}" -gt "$STALE_SECS" ]; then
-      rm -rf "$_lock" 2>/dev/null || true
-      if [ -d "$_lock" ]; then
-        sleep "$LOCK_SLEEP"
-        _i=$((_i+1))
-      fi
-      continue
-    fi
-    sleep "$LOCK_SLEEP"
-    _i=$((_i+1))
-  done
-  die "could not acquire lock at $_lock" 4
-}
-
-lock_release() { rm -rf "$1/.lock" 2>/dev/null || true; }
-
-journal() {
-  # append-only; one JSON object per line
-  printf '%s\n' "$2" >> "$1/JOURNAL.jsonl"
-}
-
-DIR="${2:-}"
-[ -n "$DIR" ] || die "missing <dir>"
-
-case "${1:-}" in
-
-  init)
-    SID="${3:-}"; PID="${4:-}"; CAP="${5:-5}"; FORKCAP="${6:-2}"
-    [ -n "$SID" ] && [ -n "$PID" ] || die "usage: init <dir> <session-id> <pid> [cap] [forkCap]"
-    mkdir -p "$DIR"
-    lock_acquire "$DIR"
-    trap 'lock_release "$DIR"' EXIT
-    if [ -f "$DIR/LEASE.json" ]; then
-      lock_release "$DIR"; trap - EXIT
-      die "lease already exists — use 'get' or 'recover'"
-    fi
-    # python3 uuid4, not uuidgen: uuidgen ships with macOS but is not
-    # guaranteed present on every Linux/container image this skill targets
-    # (confirmed missing in this session's own sandbox) — python3 is
-    # already a hard dependency of this script, so this adds nothing new.
-    CHAIN=$(python3 -c 'import uuid; print(uuid.uuid4())')
-    python3 - "$DIR/LEASE.json" "$CHAIN" "$SID" "$PID" "$CAP" "$FORKCAP" <<'PY'
-import json,sys,time
-p,chain,sid,pid,cap,forkcap = sys.argv[1:7]
-# label = "<generation>.<fork>". The root session is 1.1; its successor is 2.1;
-# a second parallel successor at that same depth is 2.2. Depth is the chain,
-# the second number is the branch.
-d = {"chainId":chain,"generation":1,"fork":1,"label":"1.1",
-     "cap":int(cap),"forkCap":int(forkcap),"ownerSessionId":sid,
-     "ownerPid":int(pid),"state":"OWNED","lineage":["1.1"],
-     "updatedAt":int(time.time())}
-tmp = p + ".tmp"
-open(tmp,"w").write(json.dumps(d,indent=2))
-import os; os.replace(tmp,p)          # atomic
-PY
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"init\",\"chainId\":\"$CHAIN\",\"generation\":1,\"fork\":1,\"label\":\"1.1\",\"sessionId\":\"$SID\",\"pid\":$PID,\"cap\":$CAP,\"forkCap\":$FORKCAP}"
-    echo "$CHAIN"
-    ;;
-
-  get)
-    [ -f "$DIR/LEASE.json" ] || die "no lease at $DIR" 2
-    cat "$DIR/LEASE.json"
-    ;;
-
-  owns)
-    SID="${3:-}"
-    [ -f "$DIR/LEASE.json" ] || exit 2
-    python3 - "$DIR/LEASE.json" "$SID" <<'PY'
-import json,sys
-d=json.load(open(sys.argv[1]))
-sys.exit(0 if d.get("ownerSessionId")==sys.argv[2] else 1)
-PY
-    ;;
-
-  state)
-    SID="${3:-}"; NEW="${4:-}"
-    [ -n "$SID" ] && [ -n "$NEW" ] || die "usage: state <dir> <session-id> <STATE>"
-    lock_acquire "$DIR"; trap 'lock_release "$DIR"' EXIT
-    [ -f "$DIR/LEASE.json" ] || { lock_release "$DIR"; trap - EXIT; die "no lease at $DIR" 2; }
-    python3 - "$DIR/LEASE.json" "$SID" "$NEW" <<'PY'
-import json,sys,os,time
-p,sid,new = sys.argv[1:4]
-d=json.load(open(p))
-if d.get("ownerSessionId")!=sid:
-    print("not owner: lease is held by %s" % d.get("ownerSessionId"), file=sys.stderr); sys.exit(1)
-valid={"OWNED","WINDING_DOWN","DOC_WRITTEN","REVIEWED","SPAWN_REQUESTED","ATTESTED","TRANSFERRED","BLOCKED","RELEASED"}
-if new not in valid:
-    print("invalid state %r" % new, file=sys.stderr); sys.exit(2)
-d["state"]=new; d["updatedAt"]=int(time.time())
-tmp=p+".tmp"; open(tmp,"w").write(json.dumps(d,indent=2)); os.replace(tmp,p)
-PY
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"state\",\"state\":\"$NEW\",\"sessionId\":\"$SID\"}"
-    ;;
-
-  next-gen)
-    SID="${3:-}"
-    [ -n "$SID" ] || die "usage: next-gen <dir> <session-id>"
-    lock_acquire "$DIR"; trap 'lock_release "$DIR"' EXIT
-    [ -f "$DIR/LEASE.json" ] || { lock_release "$DIR"; trap - EXIT; die "no lease at $DIR" 2; }
-    # Read-modify-write inside the lock: two concurrent ticks cannot both claim n+1.
-    LABEL=$(python3 - "$DIR/LEASE.json" "$SID" <<'PY'
-import json,sys,os,time
-p,sid = sys.argv[1:3]
-d=json.load(open(p))
-if d.get("ownerSessionId")!=sid:
-    print("not owner", file=sys.stderr); sys.exit(1)
-nxt = d["generation"] + 1
-if nxt > d.get("cap",5):
-    print("cap", file=sys.stderr); sys.exit(3)
-# A new generation always starts at fork 1 — the main line. Parallel siblings
-# at the same depth are claimed afterwards with `next-fork`.
-d["generation"]=nxt; d["fork"]=1
-d["label"]="%d.1" % nxt
-d.setdefault("lineage",[]).append(d["label"])
-d["updatedAt"]=int(time.time())
-tmp=p+".tmp"; open(tmp,"w").write(json.dumps(d,indent=2)); os.replace(tmp,p)
-print(d["label"])
-PY
-) || { rc=$?; lock_release "$DIR"; trap - EXIT; exit $rc; }
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"next-gen\",\"label\":\"$LABEL\",\"sessionId\":\"$SID\"}"
-    echo "$LABEL"
-    ;;
-
-  next-fork)
-    SID="${3:-}"
-    [ -n "$SID" ] || die "usage: next-fork <dir> <session-id>"
-    lock_acquire "$DIR"; trap 'lock_release "$DIR"' EXIT
-    [ -f "$DIR/LEASE.json" ] || { lock_release "$DIR"; trap - EXIT; die "no lease at $DIR" 2; }
-    LABEL=$(python3 - "$DIR/LEASE.json" "$SID" <<'PY'
-import json,sys,os,time
-p,sid = sys.argv[1:3]
-d=json.load(open(p))
-if d.get("ownerSessionId")!=sid:
-    print("not owner", file=sys.stderr); sys.exit(1)
-nxt = d.get("fork",1) + 1
-# Forks multiply cost in a way generations do not: N forks means N live
-# sessions, not one after another. The width cap is the brake.
-if nxt > d.get("forkCap",2):
-    print("forkcap", file=sys.stderr); sys.exit(3)
-d["fork"]=nxt
-d["label"]="%d.%d" % (d["generation"], nxt)
-d.setdefault("lineage",[]).append(d["label"])
-d["updatedAt"]=int(time.time())
-tmp=p+".tmp"; open(tmp,"w").write(json.dumps(d,indent=2)); os.replace(tmp,p)
-print(d["label"])
-PY
-) || { rc=$?; lock_release "$DIR"; trap - EXIT; exit $rc; }
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"next-fork\",\"label\":\"$LABEL\",\"sessionId\":\"$SID\"}"
-    echo "$LABEL"
-    ;;
-
-  label)
-    [ -f "$DIR/LEASE.json" ] || die "no lease at $DIR" 2
-    python3 - "$DIR/LEASE.json" <<'PY'
-import json,sys
-d=json.load(open(sys.argv[1]))
-print(d.get("label") or "%s.%s" % (d.get("generation","?"), d.get("fork",1)))
-PY
-    ;;
-
-  transfer)
-    SID="${3:-}"; NSID="${4:-}"; NPID="${5:-}"
-    [ -n "$SID" ] && [ -n "$NSID" ] && [ -n "$NPID" ] || die "usage: transfer <dir> <sid> <new-sid> <new-pid>"
-    lock_acquire "$DIR"; trap 'lock_release "$DIR"' EXIT
-    [ -f "$DIR/LEASE.json" ] || { lock_release "$DIR"; trap - EXIT; die "no lease at $DIR" 2; }
-    python3 - "$DIR/LEASE.json" "$SID" "$NSID" "$NPID" <<'PY'
-import json,sys,os,time
-p,sid,nsid,npid = sys.argv[1:5]
-d=json.load(open(p))
-if d.get("ownerSessionId")!=sid:
-    print("not owner", file=sys.stderr); sys.exit(1)
-d["ownerSessionId"]=nsid; d["ownerPid"]=int(npid)
-d["state"]="TRANSFERRED"; d["updatedAt"]=int(time.time())
-tmp=p+".tmp"; open(tmp,"w").write(json.dumps(d,indent=2)); os.replace(tmp,p)
-PY
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"transfer\",\"from\":\"$SID\",\"to\":\"$NSID\",\"toPid\":$NPID}"
-    ;;
-
-  release)
-    SID="${3:-}"
-    lock_acquire "$DIR"; trap 'lock_release "$DIR"' EXIT
-    [ -f "$DIR/LEASE.json" ] || { lock_release "$DIR"; trap - EXIT; die "no lease at $DIR" 2; }
-    python3 - "$DIR/LEASE.json" "$SID" <<'PY'
-import json,sys,os,time
-p,sid = sys.argv[1:3]
-d=json.load(open(p))
-if d.get("ownerSessionId")!=sid:
-    print("not owner", file=sys.stderr); sys.exit(1)
-d["state"]="RELEASED"; d["ownerSessionId"]=None; d["updatedAt"]=int(time.time())
-tmp=p+".tmp"; open(tmp,"w").write(json.dumps(d,indent=2)); os.replace(tmp,p)
-PY
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"release\",\"sessionId\":\"$SID\"}"
-    ;;
-
-  recover)
-    NSID="${3:-}"; NPID="${4:-}"
-    [ -n "$NSID" ] && [ -n "$NPID" ] || die "usage: recover <dir> <session-id> <pid>"
-    lock_acquire "$DIR"; trap 'lock_release "$DIR"' EXIT
-    [ -f "$DIR/LEASE.json" ] || { lock_release "$DIR"; trap - EXIT; die "no lease at $DIR" 2; }
-    # No liveness check here — see LIVENESS note in the file header. The
-    # caller (the model, via get_session) has already established the
-    # recorded owner is not running before invoking this.
-    python3 - "$DIR/LEASE.json" "$NSID" "$NPID" <<'PY'
-import json,sys,os,time
-p,nsid,npid = sys.argv[1:4]
-d=json.load(open(p))
-old=d.get("ownerSessionId")
-d["ownerSessionId"]=nsid; d["ownerPid"]=int(npid)
-d["state"]="OWNED"; d["updatedAt"]=int(time.time())
-tmp=p+".tmp"; open(tmp,"w").write(json.dumps(d,indent=2)); os.replace(tmp,p)
-print(old or "", file=sys.stderr)
-PY
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"recover\",\"to\":\"$NSID\"}"
-    ;;
-
-  spawn-failed)
-    SID="${3:-}"
-    [ -n "$SID" ] || die "usage: spawn-failed <dir> <session-id>"
-    lock_acquire "$DIR"; trap 'lock_release "$DIR"' EXIT
-    [ -f "$DIR/LEASE.json" ] || { lock_release "$DIR"; trap - EXIT; die "no lease at $DIR" 2; }
-    python3 - "$DIR/LEASE.json" "$SID" <<'PY'
-import json,sys,os,time
-p,sid = sys.argv[1:3]
-d=json.load(open(p))
-if d.get("ownerSessionId")!=sid:
-    print("not owner", file=sys.stderr); sys.exit(1)
-if d.get("state")!="SPAWN_REQUESTED":
-    print("not in SPAWN_REQUESTED state: %r" % d.get("state"), file=sys.stderr); sys.exit(1)
-# Refund the claim by rewinding to the previous entry in the lineage — which
-# restores the right label whether a generation or a fork was claimed.
-if d.get("lineage"): d["lineage"].pop()
-prev = d["lineage"][-1] if d.get("lineage") else "1.1"
-g,_,f = prev.partition(".")
-d["generation"]=int(g); d["fork"]=int(f or 1); d["label"]=prev
-d["state"]="BLOCKED"; d["updatedAt"]=int(time.time())
-tmp=p+".tmp"; open(tmp,"w").write(json.dumps(d,indent=2)); os.replace(tmp,p)
-PY
-    journal "$DIR" "{\"ts\":$(date +%s),\"event\":\"spawn-failed\",\"sessionId\":\"$SID\"}"
-    ;;
-
-  journal)
-    [ -f "$DIR/JOURNAL.jsonl" ] && cat "$DIR/JOURNAL.jsonl" || echo "(no journal)"
-    ;;
-
-  *)
-    die "unknown command '${1:-}' — see header for usage"
-    ;;
-esac

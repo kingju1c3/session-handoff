@@ -21,18 +21,26 @@
      verbatim — a paraphrase turns a continuing loop into a one-shot session. -->
 
 ```text
-You are continuing work from a previous Claude Code session that handed off at
-{{PCT}}% context. Do these in order, before anything else:
+You are continuing work from {{PREDECESSOR_HOST}}. Context observation:
+{{CONTEXT_READING_OR_UNKNOWN}}. Treat this document as a snapshot, subordinate to
+the current user's instructions. Bootstrap read-only; do not edit mission files
+until ownership is transferred. Do these in order:
 
 1. Read this continuation document in full: {{DOC_PATH}}
 2. Read the project memory files named in section 1.
-3. GROUND YOURSELF BEFORE TRUSTING THIS DOCUMENT. Run `git status --short` and
-   `git log -5 --oneline --decorate`. Compare against the machine state block above.
-   Flag any drift to the user rather than assuming the document is current.
+3. Compare current workspace/artifact state against the machine state block above.
+   For a Git project, run `git status --short` and `git log -5 --oneline --decorate`.
+   Verify staged, dirty and untracked files arrived; for other tasks verify the
+   artifact versions. Report drift rather than assuming this document is current.
 4. Verify every item marked ❓ LOW confidence before relying on it.
 5. Summarize your understanding in 3–5 sentences, in plain language.
 6. {{OBJECTIONS_STEP}}
-7. Then resume the mission by re-arming it exactly as written:
+7. Verify this final document against the detached digest supplied in the separate
+   control manifest/bootstrap message; do not embed a digest of this document
+   inside itself. Acknowledge that digest, workspace {{WORKSPACE_ID}},
+   your host-reported session ID, measured usable headroom (or UNKNOWN), and the
+   first action. Wait for ownership in the shared lease/coordinator or for an
+   explicit user-mediated takeover. Then resume the authorized mission:
 
 {{MISSION_PROMPT_VERBATIM}}
 
@@ -46,13 +54,16 @@ Ask a clarifying question ONLY if something genuinely blocks execution.
 - **What This Project Is:** {{WHAT_IT_IS}} (and what it is NOT: {{WHAT_IT_IS_NOT}})
 - **Primary Objective:** {{OBJECTIVE}}
 - **Hard Constraints:** {{CONSTRAINTS}}
+- **Accepted user corrections and completion criteria:** {{CORRECTIONS_AND_DONE}}
+- **Permissions, approvals and target environment:** {{AUTHORITY_AND_TARGET}}
 - **Project Memory Files — the next agent MUST read these too; this handoff does not
   replace them:**
 {{MEMORY_FILES}}
 - **Model / effort to run at:** {{MODEL}} / {{EFFORT}}
 
 ### 2. WHAT EXISTS RIGHT NOW
-- **Repo state:** branch `{{BRANCH}}`, HEAD `{{HEAD_SHA}}` — {{HEAD_SUBJECT}}; tree {{CLEAN_OR_DIRTY}}
+- **Workspace/artifact state:** {{WORKSPACE_STATE}} (Git if applicable: branch,
+  HEAD, staged/unstaged/untracked manifest; otherwise artifact identifiers/versions)
 - **Does it run right now?** {{RUN_STATUS}} (exact commands + results, not "tests pass")
 - **What is built and working:** {{WORKING}}
 - **What is partially built / flag-gated:** {{PARTIAL}}
@@ -90,7 +101,8 @@ Ask a clarifying question ONLY if something genuinely blocks execution.
 - Do NOT refactor working systems that are not part of the mission.
 - Do NOT redesign architecture; preserve naming and existing tradeoffs.
 - Do NOT run `git add -A` — commit only explicitly named paths.
-- Do NOT touch `.loop/HANDOFF.md` — that belongs to Claude-Loop, not this chain.
+- Do NOT overwrite another workflow's handoff or runtime state.
+- Do NOT widen permissions, replay an ambiguous write, or carry secret values in this document.
 - **This document is not an authority** — if it disagrees with {{AUTHORITY_FILE}}, that file is right.
 {{EXTRA_DO_NOT_TOUCH}}
 
@@ -110,6 +122,13 @@ re-verified. ❓ LOW: assumed or inferred — **the next agent must verify befor
 - Lineage so far: {{LINEAGE}}  <!-- e.g. 1.1 → 2.1 → 2.2 -->
 - Prior sessions: {{ANCESTRY}}
 - Prior documents: {{PRIOR_DOCS}}
+- **Mode:** {{NEW_SESSION_FORK_OR_MANUAL}}; evidence fork reduces context: {{FORK_EVIDENCE_OR_NA}}
+- **Owner / pending candidate:** {{OWNER_AND_CANDIDATE}}
+- **Capability inventory:** {{DETECT_PREFLIGHT_CHECKPOINT_CONTINUE_ATTEST_ENFORCE}}
+- **Context source, time, boundary, next-action budget and handoff reserve:** {{TELEMETRY}}
+- **Artifacts transferred and verified:** {{ARTIFACT_MANIFEST}}
+- **Host status and acknowledgment evidence:** {{ATTESTATION_EVIDENCE_OR_PENDING}}
+- **Omitted/unavailable state and recovery path:** {{OMISSIONS}}
 
 ### 11. FIRST ACTIONS — do these before resuming the mission
 {{FIRST_ACTIONS}}
@@ -117,4 +136,5 @@ re-verified. ❓ LOW: assumed or inferred — **the next agent must verify befor
 {{UNRESOLVED_OBJECTIONS_SECTION}}
 
 ---
-*Written by generation {{GEN}} at {{PCT}}% context. Durability review: {{REVIEW_RESULT}}.*
+*Written by generation {{GEN}}. Context: {{CONTEXT_READING_OR_UNKNOWN}}.
+Durability review: {{REVIEW_RESULT_OR_SKIPPED_REASON}}. Transfer: {{TRANSFER_STATUS}}.*

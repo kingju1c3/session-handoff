@@ -1,157 +1,159 @@
 # session-handoff
 
-**Hand a long-running agent session to a fresh one *before* auto-compaction destroys it — as an
-ownership transfer, not a polite goodbye.**
+**Continue the work in a fresh session before context compaction.**
 
-An [Agent Skill](https://code.claude.com/docs/en/skills) for Claude Code on the web, the Desktop
-app, and Claude Code Remote-bridged environments.
+A portable skill for carrying the task, decisions, evidence, and unfinished work into the next
+session. Use it with a different model, a different agent, or a new session in the same app.
+The outgoing session checkpoints; the successor verifies the handoff; one session owns the work.
 
----
+[Install](#install) · [Use](#use) · [How it works](#how-it-works) ·
+[Compatibility](#compatibility) · [Verify](#verify)
 
-## The problem
+```text
+Work → check available context before the next action
+                      │
+            headroom uncertain or insufficient
+                      ↓
+       checkpoint → review → fresh session → verify → transfer
+                                                       │
+                                             old session stops
+```
 
-A long agent run doesn't fail loudly. It fades.
-
-The context window fills. The harness compacts the conversation into a summary. Later it summarises
-the summary. And somewhere in there the agent stops executing the plan and starts executing its
-*impression* of the plan. Nothing errors. The tests still pass. The work just quietly drifts — and
-the further it drifts, the less context survives to notice.
-
-Compaction is the right default for a conversation. It is the wrong default for a **mission**.
-
-## What this does
-
-When context crosses a derived threshold, the session:
-
-1. **Stops expanding** — no new workstreams, no new tangents.
-2. **Converges** what's in flight to a real checkpoint, with a deadline.
-3. **Writes a continuation document** — including the mission prompt *byte-for-byte verbatim*,
-   because a paraphrase silently turns a continuing loop into a one-shot session.
-4. **Submits it for adversarial review** by a fresh reviewer with its own context, against seven
-   criteria. A session at 70% context is the last thing that should grade its own handoff.
-5. **Spawns a genuinely fresh session** carrying that mission.
-6. **Proves the successor is alive** from a source the successor cannot fabricate.
-7. **Transfers ownership** — and then stops working. Two live sessions sharing one working tree is
-   the failure this exists to prevent.
-
-## Why this isn't just a prompt telling a model to be careful
-
-Because a model under load misses instructions, and the moment it matters most is the moment it's
-most loaded. So the deadline is enforced by the harness, not by the model's judgment:
-
-| Hook | What it does |
-| --- | --- |
-| `PreCompact` | **Refuses auto-compaction** while a handoff is armed and unfinished, naming the exact next step. Bounded at two attempts, then it lets compaction through and instead tells the summariser exactly what must survive verbatim. Never blocks a human's `/compact`. |
-| `Stop` | **Refuses to let the turn end** mid-handoff, when the lease says a successor was promised and never delivered. Bounded at two. |
-| `PostToolUse` | Injects the advisory when the session crosses the soft trigger. Debounced; escalations always get through. |
-| `SessionStart` | Re-injects the chain state into a context that just lost it. |
-
-`PreCompact` is the one that matters: it fires when compaction is *genuinely about to happen*, so
-the guarantee doesn't depend on any threshold being guessed correctly.
-
-That matters more than it sounds. Agent platforms compact anywhere from **~60% to ~95%** of their
-window — 35 points apart. Any tool that hardcodes a percentage is wrong almost everywhere. This one
-derives its thresholds from the platform's real compaction point, and then doesn't have to rely on
-them being right.
+**The protocol is portable; automatic timing depends on the host.** No skill can guarantee rotation
+before compaction when an app hides its boundary or can compact without giving the skill control.
+This skill handles that limit explicitly: checkpoint immediately when telemetry is missing, keep
+the checkpoint current, and move to a new session early. It never substitutes a guessed model
+percentage for a verified host limit.
 
 ## Install
 
-The repository **is** the skill. Clone it straight into your skills directory:
+The repository is the skill. Review its files before enabling executable hooks.
 
-```bash
-git clone https://github.com/kingju1c3/session-handoff ~/.claude/skills/session-handoff
-sh ~/.claude/skills/session-handoff/scripts/selftest.sh
+For [Codex's personal skill directory](https://developers.openai.com/codex/skills/create-skill/):
+
+```sh
+git clone https://github.com/kingju1c3/session-handoff ~/.agents/skills/session-handoff
+cd ~/.agents/skills/session-handoff
+sh scripts/selftest.sh
+node scripts/watchdog.test.mjs
 ```
 
-`selftest.sh` runs 46 assertions over the lease, the threshold derivation, and every hook path — no
-network, no session spawning, nothing written outside a temp dir.
+For [Claude Code's personal skill directory](https://code.claude.com/docs/en/skills), use this
+destination instead:
 
-Per-project instead: clone into `.claude/skills/session-handoff/`.
+```sh
+git clone https://github.com/kingju1c3/session-handoff ~/.claude/skills/session-handoff
+cd ~/.claude/skills/session-handoff
+sh scripts/selftest.sh
+node scripts/watchdog.test.mjs
+```
 
-For unattended runs, also register the hooks in `~/.claude/settings.json` so they're live from the
-first turn (and so you get `SessionStart`) — the snippet is in [`SKILL.md`](SKILL.md).
+If a destination already exists, inspect and update that installation instead of cloning over it.
+Reload the host's skill list or start a new session, then confirm that `session-handoff` appears.
+Installation alone does not register hooks or prove automatic rotation.
 
-Requires `node` and `python3`.
+The scripts require Node.js, Python 3, and a POSIX shell. Use WSL or an appropriate POSIX environment
+on Windows; native PowerShell execution is not claimed. The plain-text protocol needs none of these.
+
+For other agents, place this repository in the host's documented skill directory. In a chat app
+without skill installation, supply [SKILL.md](SKILL.md) as instructions and use the
+[handoff template](HANDOFF-TEMPLATE.md) as text you can save and paste into a new chat.
 
 ## Use
 
-In a session running something worth protecting:
+In Claude Code:
 
-```
+```text
 /session-handoff
+Keep this task moving across sessions. Checkpoint before compaction and use a fresh session
+when the next action no longer fits safely. Preserve my goal, constraints, and unfinished work.
 ```
 
-It arms a lease and **goes dormant**. With no armed chain every hook exits immediately and does
-nothing — install it globally and forget it. Once armed, it watches, warns at the soft trigger, and
-refuses to let compaction happen before the mission has a successor.
+In Codex, select `session-handoff` from the skill picker or mention it in the task. In any other
+host, load the skill and give the same instruction in plain language.
 
-Successors are named by lineage — `1.1` hands off to `2.1`; a parallel fork at that depth is `2.2`:
+To hand off immediately:
 
-```
-1.1 ──→ 2.1 ──→ 3.1
-         └──→ 2.2        (parallel fork)
-```
-
-Depth is capped (default 5) and width is capped (default 2), because forks multiply *simultaneously
-live* sessions and therefore cost.
-
-## Thresholds
-
-```
-soft trigger  = compaction point − 15 points
-hard deadline = compaction point −  5 points
+```text
+Use session-handoff now. Save and verify the current checkpoint, then continue in a fresh
+session. A fork is acceptable only if the host proves it leaves enough usable context.
 ```
 
-The compaction point is resolved as: `HANDOFF_COMPACTION_PCT` (your config) →
-`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (the platform stating it) → **70%, assumed**.
+The skill uses only capabilities and permissions available in the current host. When it cannot
+create a session, it produces the checkpoint and a ready-to-paste continuation prompt for you.
 
-Configuration is also how you buy margin, not just how you fill a gap. If your platform compacts at
-95% and you don't want a mission being driven at 80% of a million-token window, set the compaction
-point *lower than the truth* — the whole policy moves down with it.
+## How it works
 
-**Why derived and not written down:** an earlier version of this carried a hardcoded 85% hard
-deadline. Reading the real compaction point on a live session showed it compacting at 80% — the
-"deadline" was past the cliff. A deadline above the compaction point is not a deadline.
+1. **Discover the host's capabilities.** Identify current context usage, the earliest applicable
+   compaction boundary, session creation, and independent successor status. Unknown stays unknown.
+2. **Budget before the next action.** Include the next request, possible tool output, and room to
+   finish the handoff. Start transferring while that work still fits.
+3. **Save the continuation.** Preserve the goal, constraints, decisions and their reasons, exact
+   work locations, verified results, uncertainty, and the next concrete actions.
+4. **Review the checkpoint.** Check it against source evidence. Mark missing or unavailable
+   independent review honestly; a self-check is not an independent review.
+5. **Start the successor.** Prefer a fresh session carrying the checkpoint. A fork qualifies only
+   when its inherited history and resulting headroom have been verified.
+6. **Verify, transfer, stop.** Verify the actual successor through the host, transfer the single
+   writer lease where available, and stop the outgoing session's writes.
 
-## What's verified, and what isn't
+The preflight rule is deliberately independent of model names:
 
-This matters more than a feature list, so it's stated plainly here and in full in [`SKILL.md`](SKILL.md):
+```text
+current occupancy + next-action upper bound + handoff reserve < compaction boundary
+```
 
-- ✅ **Spawning works.** Live-tested: a real successor reached running/connected in ~35 seconds with
-  the requested branch checked out — a server-reported fact, not self-reported.
-- ✅ **Attestation works in two layers** — the platform's own record of where the session is, plus
-  its relay of the successor's first reply, so a skipped attestation is a visible mismatch rather
-  than silence you might read as success.
-- ✅ **Every hook path is tested** — all four events, every block, budget, debounce and cap.
-- ⚠️ **Hook registration from skill frontmatter** follows the official hooks reference but was not
-  observed firing here. The `settings.json` install is the belt-and-braces version.
-- ⚠️ **Desktop-app tool availability is inferred**, not directly verified. Where the spawn tools are
-  absent, everything up to the reviewed continuation document still works; only the automatic spawn
-  doesn't — and the skill says so rather than pretending.
-- ⚠️ **This costs real money.** Each generation is a real session. That's what the caps are for.
+Equality is already too late to start more work. Missing or stale inputs cannot authorize more
+work on the assumption that there is room. If the boundary is unknown, save a checkpoint now and
+refresh it after meaningful changes; use short work segments and early session changes.
 
-## Porting to another agent
+See the [context signal contract](references/context-signal.md) for the machine-readable inputs
+and [host notes](references/hosts.md) for the distinction between a warning hook and a blocking hook.
 
-The parts that are genuinely portable ship once: the ownership lease, the continuation template, the
-seven review criteria, the transfer ordering, the trigger policy. Only three things are
-platform-specific — **DETECT** (how full am I, and where does this platform compact), **SPAWN** (how
-do I create a successor carrying a prompt), and **ATTEST** (what can the platform tell me about that
-successor that it can't fake) — plus an optional fourth, **ENFORCE** (can a hook refuse compaction).
+## Compatibility
 
-What that looks like elsewhere, from research rather than working implementations:
+| Environment | Available approach | Evidence boundary |
+| --- | --- | --- |
+| An LLM chat that accepts instructions | Plain-text checkpoint and manual new chat | Portable workflow; no hidden-threshold guarantee |
+| A tool-using agent with filesystem access | Checkpoint files, budget check, ownership lease | Requires the supplied runtimes and integration with the host |
+| Claude Code | Skill plus optional Claude hook adapter | Current docs support a `PreCompact` veto; verify the installed host before enabling it |
+| Codex | Skill; fresh task/session through the available host tools | Forking copies history, so a fork alone does not prove context relief |
+| Cursor | Skill/manual transfer; documented `preCompact` notification | The notification cannot block or modify compaction |
+| Gemini CLI | Skill/manual transfer; documented `PreCompress` notification | The notification is asynchronous and cannot block compression |
+| Other hosts and models | Start with the plain-text protocol; add verified capabilities | No automatic adapter or live compatibility claim is implied |
 
-| Platform | DETECT | SPAWN | Can a hook block compaction? |
-| --- | --- | --- | --- |
-| **Cursor** | `preCompact` hook delivers `context_usage_percent` directly — the best DETECT signal anywhere | cloud/background agents exist; no verified scriptable create-with-prompt | unverified |
-| **OpenAI Codex** | `PreCompact` hook (GA v0.124+); or session JSONL token usage | `codex exec fork <id> "<prompt>"` — natively inherits the prior transcript | likely; `PreToolUse` can also *deny* tool calls from a superseded session |
-| **Gemini CLI** | session JSONL + `/stats`; auto-compress threshold is configurable (~60% cited) | `gemini -r "<id>" "<prompt>"` resumes with a new prompt in one command | hooks are first-class; `gemini hooks migrate` imports Claude Code hooks |
-| **GitHub Copilot CLI** | `/context`, `/usage`; auto-compaction documented at ~95% | `copilot --resume`; `&`-prefix delegates to the cloud agent | no `preCompact` — advisory only |
-| **OpenClaw** | `contextTokens > contextWindow − reserveTokens`; `openclaw sessions --json` | `/new`; subagent fork (no nesting) | `before_compaction` is observe-only |
-| **Amp** | token-usage display | `/handoff` opens a new thread natively — but keeps the old one alive, with no ownership transfer | compaction was *replaced* by handoff |
+Host behavior is documented in [references/hosts.md](references/hosts.md), with primary sources.
+The skill does not contain a model-to-percentage table: the same model can be used by hosts with
+different context policies, and those policies can change.
 
-The `SKILL.md` package format itself is portable: Gemini, Copilot, Cursor, Codex and Claude Code all
-read it, and Copilot reads `.claude/skills/` directly.
+## Verify
+
+Run the local checks from the repository root:
+
+```sh
+sh scripts/selftest.sh
+node scripts/watchdog.test.mjs
+```
+
+These checks exercise the local scripts and synthetic inputs. They are not live end-to-end
+tests of every host. To claim an automatic integration works, also demonstrate in the installed
+host that the signal arrives early enough, the successor starts with sufficient headroom, its
+checkpoint is verified, and the old writer stops. Test missing telemetry and failed successor
+creation as well as the successful path.
+
+No automatic hook registration, model calls, or session creation is needed for the plain-text
+workflow. Review [SKILL.md](SKILL.md) before configuring an adapter.
+
+## Why keep a checkpoint outside the conversation?
+
+A checkpoint gives the next session a reviewable starting point: what was requested, why choices
+were made, what actually passed, and what remains. It also makes gaps visible before a summary
+silently becomes the new source of truth. It is not a promise of perfect memory or a verbatim
+archive of every message. Preserve source references and attachments when exact detail matters.
+
+Keep secrets and unnecessary personal data out of handoffs. Preserve the original task's access
+boundaries; moving to another model or service does not grant permission to send it private files.
 
 ## License
 
-MIT © 2026 KingJu1c3
+[MIT](LICENSE).

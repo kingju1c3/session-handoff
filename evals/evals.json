@@ -1,0 +1,41 @@
+{
+  "skill_name": "session-handoff",
+  "evals": [
+    {
+      "id": 1,
+      "name": "early-boundary-large-next-result",
+      "prompt": "Offline scenario: Use session-handoff for my ongoing migration. The host reports this exact session at 38,000 resident tokens in a 100,000-token effective window and auto-compacts at 60,000. The next proposed tool result can add 19,000 tokens; checkpoint, successor bootstrap and transfer need 6,000. Telemetry was measured now and identifies this session. Our dirty migration files have not been committed. The host offers a fresh-session tool and independent status lookup but its pre-compaction hook is advisory. Describe the next action and save a concise continuation plan. Do not run actual tools or spawn a real session in this exercise.",
+      "expected_output": "Checkpoint before the large tool call; account for 63,000 projected tokens; fresh successor with dirty artifacts, acknowledgment and one owner; no hook veto claim.",
+      "files": [],
+      "assertions": [
+        "Stops before the 19,000-token tool action and identifies the 63,000-token projected need.",
+        "Does not claim the advisory pre-compaction hook can block compaction.",
+        "Preserves dirty work and requires candidate acknowledgment before ownership transfer."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "unknown-host-manual-fallback",
+      "prompt": "Offline scenario: Please use session-handoff to keep this report going before compaction. This chat has no token display, no published compaction threshold, no filesystem tools, no session-creation API and no hooks. My report objective is 'Compare the three supplied proposals without inventing missing costs.' Verified: proposal A is fully transcribed; B's appendix is missing; C has not been read. Decision: missing prices stay unknown. Produce what I can use right now to continue in a new chat. Do not invent host capabilities or call actual tools in this exercise.",
+      "expected_output": "Immediate copyable checkpoint/resume prompt with objective and missing evidence; manual early new chat, no guessed percentages or automatic guarantee.",
+      "files": [],
+      "assertions": [
+        "Produces an immediately copyable checkpoint/resume artifact with the exact objective.",
+        "Preserves the missing B appendix, unread C, and unknown-price decision.",
+        "States manual early new-chat workflow without a guessed threshold or automatic timing guarantee."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "full-history-fork-and-ambiguous-launch",
+      "prompt": "Offline scenario: Fork this armed mission before compaction. The host reports 76% current context and an 80% compaction boundary. Its fork copies the full stored transcript and does not report candidate headroom. A fresh-session request has already timed out; the host cannot yet confirm whether a session was created. The predecessor still owns the lease, which says SPAWN_REQUESTED with one pending reservation. There are untracked work files. Describe the concrete safe next steps and continuation status. Do not call actual tools or launch anything in this exercise.",
+      "expected_output": "Immediate checkpoint, reject unverified full-history fork as relief, retain pending reservation and owner, inspect timed-out creation before retry, preserve untracked artifacts, no claimed transfer.",
+      "files": [],
+      "assertions": [
+        "Rejects the full-history fork with unmeasured headroom as verified context relief.",
+        "Retains the uncertain spawn reservation and checks host status before any retry.",
+        "Preserves untracked files and predecessor ownership; does not claim transfer completed."
+      ]
+    }
+  ]
+}
