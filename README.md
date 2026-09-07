@@ -2,8 +2,8 @@
 
 <p align="center">
   <strong>Fresh session. Same goal.</strong><br>
-  Carry your decisions, evidence, and unfinished work into the next AI chat.<br>
-  One self-contained skill for desktop and browser assistants.
+  Help your next AI chat pick up where this one leaves off.<br>
+  For AI apps on your desktop or in your browser.
 </p>
 
 <p align="center">
@@ -24,103 +24,98 @@
 
 <br>
 
+A **skill** is a set of instructions for an AI. This one helps it prepare notes for your next
+chat: your goal, the choices you made, what is finished, and what still needs doing.
+
+Long chats can get shortened by the app, leaving the AI with less of the conversation to read.
+A **handoff** means giving those notes and any needed files to a fresh chat so it can continue
+the work.
+
 ## Quickstart
 
-Stay in the same app, switch models, or continue with another assistant.
-
-1. **Load the skill.** Download [SKILL.md](https://raw.githubusercontent.com/kingju1c3/session-handoff/main/SKILL.md)
-   and attach it to your current chat, or paste its complete contents. The workflow and
-   continuation template are included. If your app rejects Markdown attachments, paste the text.
-2. **Activate it for your task.**
+1. Open the [instructions file](https://raw.githubusercontent.com/kingju1c3/session-handoff/main/SKILL.md)
+   and attach it to your current chat. You can also copy all its text and paste it into the chat.
+   If the app will not accept the file, use the copy-and-paste option.
+2. Send this message:
 
    ```text
-   Use session-handoff for this task.
-   Keep a current checkpoint.
-   Move to a fresh session before
-   compaction. Preserve my goal,
-   constraints, decisions, evidence,
-   and unfinished work.
-   Use this app's available tools.
-   If needed, give me the full handoff
-   and resume prompt for a new chat.
+   Use session-handoff.
+   Keep notes for this task:
+   my goal, rules, decisions,
+   files, progress, and next steps.
+   Help me move to a fresh chat
+   before this one gets too long.
+   If you cannot open a new chat,
+   give me the notes and a message
+   to paste into one.
    ```
 
-3. **Keep working.** The assistant checks what your app can do and prepares the continuation
-   using the capabilities available in that session.
+3. Continue your task. The AI will prepare notes as you work and explain when you need to
+   open a new chat yourself.
 
-**With the required native tools**, it can create and verify a successor through the host's
-authorized controls.
-**With manual transfer**, it delivers a complete checkpoint and resume prompt. Open a fresh chat,
-provide the skill, continuation, and required source files, then send that prompt. The successor
-checks the handoff before taking over. Confirm that the old session has stopped and the fresh
-chat owns the task before work resumes.
-
-This route needs no API key, command line, or separate skill. Use your app's attachment control
-or paste the full skill into the composer. File-upload help:
-[ChatGPT](https://help.openai.com/en/articles/8555545-file-uploads-faq) ·
+You do not need to run code. For help attaching a file, see the guides for
+[ChatGPT](https://help.openai.com/en/articles/8555545-file-uploads-faq) or
 [Claude](https://support.claude.com/en/articles/8241126-upload-files-to-claude).
 
 ## Install once
 
-Download the [skill ZIP](https://github.com/kingju1c3/session-handoff/releases/latest/download/session-handoff.zip)
-and install it through your app. Native installation makes `session-handoff` available without
-attaching its instructions each time.
+If your app supports skills, you can install this one instead of attaching the instructions
+each time. Download the [skill ZIP](https://github.com/kingju1c3/session-handoff/releases/latest/download/session-handoff.zip)
+and follow your app's upload guide:
 
-- **ChatGPT:** **Plugins → Skills → Create → Upload from your computer**. Availability depends
-  on your account, workspace, and app surface.
-  [Official guide](https://help.openai.com/en/articles/20001066-skills-in-chatgpt).
-- **Claude:** **Customize → Skills → + → Create skill → Upload a skill**. Upload the ZIP and
-  enable it. Native skills require **Code execution and file creation**.
-  [Official guide](https://support.claude.com/en/articles/12512180-use-skills-in-claude).
-- **Other desktop agents:** use the app's documented skill installation path, then select or
-  mention `session-handoff`. [SKILL.md](SKILL.md) is the same entry point.
+- [Install a skill in ChatGPT](https://help.openai.com/en/articles/20001066-skills-in-chatgpt).
+- [Install a skill in Claude](https://support.claude.com/en/articles/12512180-use-skills-in-claude).
 
-The [source build](#development) produces `dist/session-handoff.skill` and
-`dist/session-handoff.zip`: identical packages with different extensions. Use the ZIP wherever
-an uploader requests it. `dist/session-handoff.md` contains the complete instructions for
-attaching or pasting.
+The option may depend on your account or organization. For a different app, follow its own
+skill-installation guide. If installation is unavailable, use the Quickstart above.
 
 ## How it works
 
-1. **Keep the goal intact.** Record the task, constraints, permissions, and current owner.
-2. **Checkpoint early.** Preserve decisions and their reasons, work locations, actual results,
-   open questions, and the next concrete action. Keep the source material accessible.
-3. **Review the continuation.** Compare it with the available evidence. Record independent
-   review when available and identify unresolved gaps.
-4. **Verify the successor.** Confirm that the new session received the right checkpoint and
-   can access the material it needs before changing the work.
-5. **Transfer and stop.** The successor continues; the outgoing session stops working on the
-   task. Automated handoff requires an observable acknowledgment and coordinated ownership.
+1. **Write the notes.** The AI records your goal, decisions and their reasons, completed work,
+   missing information, and the next steps. It checks the notes against the work available.
+2. **Move to a fresh chat.** If the app lets the AI open and check a new chat, it can handle
+   the move using those tools. Otherwise, open a new chat and add the full skill instructions,
+   notes, needed files, and the message the AI gives you.
+3. **Check what arrived.** The new chat reads the notes and checks that it can open the files
+   it needs. Old attachments may not follow automatically, so you may need to add them again.
+4. **Continue in one place.** Stop work in the old chat before the new one continues. For a
+   manual move, tell the new chat that the old one has stopped and it can take over.
 
-The skill uses measured context headroom when the host exposes it. When an app hides its
-compaction boundary, no skill can guarantee a handoff before compaction. It checkpoints early
-and refreshes that checkpoint after meaningful changes instead of inventing a context percentage.
+When the app shows how much room is left, the AI checks before large steps. When that
+information is hidden, it saves notes early. No skill can guarantee finishing the move before
+an app shortens a chat without warning. Keep a copy of the notes and move early.
 
-Prefer a fresh chat for context relief. ChatGPT's documented
-[web branching feature](https://help.openai.com/en/articles/6825453-chatgpt-release-notes)
-starts a conversation from an existing message; branching alone does not establish available
-headroom. A branch qualifies only when the host can verify that it has enough room.
+Prefer a fresh chat when you need more room. A branch may carry over the same long history;
+use one only when the app can check that it has enough room to continue.
 
-Keep credentials out of continuations. Moving to another app does not expand the original
-permission to share files or perform actions.
+Keep passwords and secret keys out of the notes. Only move files to another app when you have
+permission to share them there.
 
 ## Development
 
-[session-handoff.mjs](session-handoff.mjs) is the single JavaScript engine. It uses standard
-platform APIs and runs from the same source in Node.js and a browser, with no third-party
-runtime dependencies. The engine validates the handoff sequence; the host supplies tools for
-files, sessions, and coordinated state updates.
+<details>
+<summary>Technical details and local checks</summary>
 
-From the repository root:
+[session-handoff.mjs](session-handoff.mjs) is the single JavaScript engine. The same source runs
+in Node.js and a browser using standard platform APIs, with no third-party runtime dependencies.
+It validates the handoff sequence; the app supplies tools for files, sessions, and coordinated
+state updates. [SKILL.md](SKILL.md) contains the full instructions for the AI.
+
+Run these commands from the repository root:
 
 ```sh
 node --test tests/*.test.mjs
 node build.mjs
 ```
 
-The packages contain `SKILL.md`, `session-handoff.mjs`, this README, and the license. Local tests
-check the engine and package; they do not establish that every vendor's desktop or browser app
-can perform an automatic handoff. Verify the available tools in the actual host.
+The build produces `dist/session-handoff.skill` and `dist/session-handoff.zip`, identical
+packages with different extensions, plus `dist/session-handoff.md` for attaching or pasting.
+Each package contains `SKILL.md`, `session-handoff.mjs`, this README, and the license.
+
+Local tests check the engine and package. Automatic handoffs still need testing in the actual
+app; these checks do not prove that every desktop or browser app can perform one.
+
+</details>
 
 ## License
 
