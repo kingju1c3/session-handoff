@@ -35,6 +35,20 @@ The notes also preserve what did not work and why. The next chat can start with 
 to the full notes, then confirm it has read the needed files and name its first step before
 continuing.
 
+## What it keeps intact
+
+Session Handoff helps a fresh chat recover the information that usually gets lost when a long
+conversation ends:
+
+- The exact goal, scope, permissions, and work still unfinished.
+- Decisions, failed attempts, open questions, and the reason for each next step.
+- The files and artifacts the new chat must read before it starts changing work.
+- One clear owner, so the old and new chats do not both continue the same task.
+
+It can use a small preview to orient the new chat, but the full checkpoint remains the source of
+truth. A preview never proves that the new chat has enough context, has access to every file, or
+owns the task.
+
 ## Quickstart
 
 1. Open the [instructions file](https://raw.githubusercontent.com/kingju1c3/session-handoff/main/SKILL.md)
@@ -91,7 +105,8 @@ can still open a task now when the app allows it, but cannot promise a later aut
    notes, needed files, and the message the AI gives you.
 3. **Check what arrived.** The new chat reads the notes and checks that it can open the files
    it needs. When a required reading list is provided, it confirms each file and the recorded
-   first step. Old attachments may not follow automatically, so you may need to add them again.
+   first step before it edits anything. Old attachments may not follow automatically, so you may
+   need to add them again.
 4. **Continue in one place.** Stop work in the old chat before the new one continues. For a
    manual move, tell the new chat that the old one has stopped and it can take over.
 
@@ -104,6 +119,13 @@ use one only when the app can check that it has enough room to continue.
 
 Keep passwords and secret keys out of the notes. Only move files to another app when you have
 permission to share them there.
+
+## Works with your app, not around it
+
+The skill works in text-only chats, desktop apps, and browser AI tools. It uses an app's native
+new-task and file controls when they are actually available. For Codex, the optional hook adapter
+can ask for a handoff before a large next step or compaction, but it must be separately trusted
+and observed in the app. A configured hook is not proof that automatic handoff timing works.
 
 ## Development
 
