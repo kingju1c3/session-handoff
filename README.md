@@ -49,6 +49,23 @@ It can use a small preview to orient the new chat, but the full checkpoint remai
 truth. A preview never proves that the new chat has enough context, has access to every file, or
 owns the task.
 
+## Optional project archive and recovery
+
+When you request local session history, the skill can organize a full checkpoint, a short
+continuation summary, reusable knowledge notes, and an index in approved private storage.
+The summary and index help the next chat find relevant material; it still reads the full
+checkpoint and required files. Extra transcript copies are off by default.
+
+Interrupted saves are recovered against the recorded project, worktree, session, and mission
+chain. Missing or incomplete content is labeled **degraded**, with a concrete recovery action.
+A newer note from another session is never silently substituted. Failed saves preserve the
+last valid checkpoint, and housekeeping cannot move files referenced by an active handoff.
+
+These are portable instructions performed with the agent's available tools. This update does
+not add an archive daemon, Claude Code hook adapter, paid background summarizer, or reconnect
+loop. The existing JavaScript lifecycle API is unchanged. Optional archive metadata stays
+separate from frozen runtime objects and their hashes.
+
 ## Optional Engram memory
 
 When you explicitly ask for Engram and an approved Engram memory backend is available, the skill also recalls relevant decisions and records the work's outcome before the handoff checkpoint is frozen. That gives the next chat useful history while the checkpoint remains the authoritative record for files, permissions, readiness, and ownership. Without the backend, the handoff still works and reports that memory is unavailable.
@@ -162,6 +179,32 @@ This independently implemented design draws inspiration from Engram's
 [decision and failure records](https://github.com/staticroostermedia-arch/engram/blob/4203062b33d4a5ca14a4f7ffefc20fb1478dc2f7/grok-plugin-engram/skills/engram-working-memory/SKILL.md),
 and [session-end records](https://github.com/staticroostermedia-arch/engram/blob/4203062b33d4a5ca14a4f7ffefc20fb1478dc2f7/grok-plugin-engram/skills/engram-session-end/SKILL.md).
 No Engram code or prose is included, and no Engram backend is required.
+
+### Compilation source
+
+Archive and recovery concepts were reviewed at
+[SUNWOONGKYU/claude-code-session-handoff, commit 8e1ee5e](https://github.com/SUNWOONGKYU/claude-code-session-handoff/tree/8e1ee5e3bd159f9af0e55bea7525b1e864402a4e).
+The source is [MIT licensed, copyright 2026 SUNWOONGKYU](https://github.com/SUNWOONGKYU/claude-code-session-handoff/blob/8e1ee5e3bd159f9af0e55bea7525b1e864402a4e/LICENSE).
+This compilation uses independently written instructions; no upstream code or prose is copied.
+
+| Source concept | Adaptation here |
+| --- | --- |
+| Summary, wiki, and index layers | Optional orientation, sourced knowledge notes, and a derived catalog around the complete checkpoint. |
+| Project archive anchor | Recorded project/worktree/chain identity, with private storage and verified destination mapping. |
+| Startup restoration | Bounded discovery followed by full required reads and read-only acknowledgment. |
+| Missed-exit recovery | Reconcile the exact source, preserve the last valid version, and disclose gaps before resuming. |
+| Degraded summaries and limited retries | Evidence-based quality labels, explicit repair actions, and persistent bounded attempts. |
+| Archiving older notes | Requested housekeeping only; stable references for active handoffs and no automatic deletion. |
+
+Relevant source files are the
+[README](https://github.com/SUNWOONGKYU/claude-code-session-handoff/blob/8e1ee5e3bd159f9af0e55bea7525b1e864402a4e/README.md),
+[restore hook](https://github.com/SUNWOONGKYU/claude-code-session-handoff/blob/8e1ee5e3bd159f9af0e55bea7525b1e864402a4e/hooks/session-restore.js),
+and [distillation worker](https://github.com/SUNWOONGKYU/claude-code-session-handoff/blob/8e1ee5e3bd159f9af0e55bea7525b1e864402a4e/hooks/wiki-distill-worker.js).
+The upstream worker uses a permission-bypass flag and removes an API-key environment variable
+to choose another authentication route. Those behaviors are excluded, along with automatic
+raw-transcript copying, branch-mismatch restoration, and model-specific background calls.
+
+### Existing runtime and checks
 
 The same module exports `evaluateCodexHook` and provides a Node-only `--codex-hook` entry point.
 The [Codex setup recipe](SKILL.md#codex-automatic-setup-connect-the-trigger-and-task-controls)
