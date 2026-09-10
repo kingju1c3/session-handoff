@@ -11,6 +11,14 @@ Continue the same mission in a session with room to work. Save the context **bef
 
 Everything needed for the workflow is in this file. The bundled `session-handoff.mjs` implements the same lifecycle for hosts that can execute JavaScript. Never require a companion skill, a shell, a particular vendor, or a private path to use this skill.
 
+## Non-negotiable lossless continuation contract
+
+When this skill starts a successor task, it MUST first create a comprehensive handoff and transfer that handoff to the successor. A summary, preview, new task window, thread ID, or copied final message is never a handoff by itself.
+
+Use **lossless** only for all *available and authorized mission state*: the exact non-secret user objective and corrections; current work and repository/document state; decisions and reasons; verified commands and evidence; failed approaches; open risks; in-flight work; required artifacts; permissions and ownership; and the ordered next action. Preserve exact source artifacts or their accessible immutable references, not a prose paraphrase of them. The checkpoint MUST name every omission, unavailable source, redaction, or uncertain claim. Hidden model state, unavailable host history, inaccessible files, and secrets are outside the lossless boundary and MUST be reported as such; never silently replace them with an invented reconstruction.
+
+The predecessor MUST NOT call a native task-creation operation until the complete checkpoint is saved, read back, bound to its artifacts, and ready to deliver. The successor MUST receive the complete checkpoint and all required artifacts or verified accessible references, then acknowledge the exact checkpoint version/digest, artifact IDs, mission, permissions, and first action before transfer. Mark the result `lossless verified` only after those checks pass; otherwise mark it `degraded` or `blocked` with the exact gap.
+
 ## 1. Activate and establish the owner
 
 Activate only for a user's handoff/continuity request or an already armed mission. Keep the user's original objective and accepted corrections. Do not replace their mission with the narrower task of making a handoff.
@@ -101,11 +109,34 @@ The lifecycle engine alone does not monitor Codex or open tasks. For an authoriz
    "/absolute/path/to/node" "/absolute/path/to/session-handoff.mjs" --codex-hook
    ```
 
-3. Save and read back an initial complete checkpoint before arming. Create the current session's private control file at `~/.codex/session-handoff/<session_id>.json`, using its observed identifier, directory mode `0700` and file mode `0600`. Use `schema: 1`, exact `sessionId`, canonical `cwd`, `armed: true`, and the absolute `checkpointPath`. The checkpoint must exist as a readable regular file; control, checkpoint and transcript paths must not traverse symlinks. Supply positive `handoffReserveTokens` and a bounded `maxNextStepTokens`; include `boundaryTokens` only when the actual boundary is known. Never arm every task or derive a boundary from a guessed universal percentage.
+3. Save and read back an initial complete checkpoint before arming. Create the current session's private control file at `~/.codex/session-handoff/<session_id>.json`, using its observed identifier, directory mode `0700` and file mode `0600`. Use `schema: 1`, exact `sessionId`, canonical `cwd`, `armed: true`, and the absolute `checkpointPath`. The checkpoint must exist as a readable regular file; control, checkpoint and transcript paths must not traverse symlinks. Supply positive `handoffReserveTokens` and a bounded `maxNextStepTokens`; include `boundaryTokens` only when the actual boundary is known. Set `autoCreate: true` only when the user has explicitly authorized automatic fresh-task creation for this mission. Never arm every task or derive a boundary from a guessed universal percentage.
 4. Have the user review the exact new or changed hook definitions through Codex's supported trust flow (`/hooks` in the CLI). Never approve trust on the user's behalf, edit trust records, bypass hook trust, or weaken policy. A definition awaiting review is registered but inactive. Follow the [official hook documentation](https://developers.openai.com/codex/hooks) for current discovery and trust behavior.
 5. Observe an actual matching event from the armed session and its effect on a harmless bounded call. Until trust and execution are observed, report `configured; hook execution unverified`. A direct CLI fixture tests the adapter only. Record evidence for trigger execution, native task creation, file access, goal restoration, and ownership transfer separately.
 
 For a verified, armed root session, missing/stale token evidence or an unknown boundary requests an early handoff. The first eligible call in a turn receives feedback: an ordinary call with a valid turn ID is denied; a native handoff call remains available. Later calls remain available for checkpoint work. Without a valid turn ID, the adapter supplies feedback without denial or a per-turn marker. This is cooperative prompting, not a security lock: pause ordinary mission work on the signal even when a later call would be allowed. Do not replay the denied large call, disable the check to continue work, or repeatedly launch tasks because telemetry stays unavailable.
+
+### Automatic successor dispatch
+
+`autoCreate: true` makes a verified handoff signal an instruction to the active Codex agent to launch one successor task only after the complete lossless checkpoint has been saved, read back, bound to its required artifacts, and reserved for delivery. The agent MUST pass that complete checkpoint and the successor bootstrap through `mcp__codex_app__create_thread`, then wait for and inspect the returned task before ownership transfer. It may not send a summary or preview as the only payload, stop at a handoff document, ask the user to open a task, or create a second candidate after an ambiguous result.
+
+The hook process itself cannot call MCP tools or approve trust. It only supplies the verified signal and blocks the unsafe next action. Codex's active agent performs task creation through the native task tool, which preserves the app's account, project, worktree, and user-visible authorization controls. This is intentional: a local hook must never silently create tasks through private APIs or a copied credential.
+
+Use this control shape only after the checkpoint has been saved and read back:
+
+```json
+{
+  "schema": 1,
+  "sessionId": "observed-current-session-id",
+  "cwd": "/absolute/canonical/workspace",
+  "checkpointPath": "/absolute/private/checkpoint.md",
+  "armed": true,
+  "autoCreate": true,
+  "handoffReserveTokens": 12000,
+  "maxNextStepTokens": 4000
+}
+```
+
+`autoCreate` is per-session and expires with the control file. After a verified transfer, disarm the predecessor and write a new control for the successor only if the same authorization still applies. A static skill cannot open a chat by itself; the automatic path is verified hook feedback, complete checkpoint delivery through the native Codex task operation, successor acknowledgment, and only then ownership transfer.
 
 The `PreCompact` handler returns `continue: false` to stop compaction only for a verified, armed root session. If root identity cannot be verified, including a missing or unreadable transcript, the adapter emits advisory feedback only: no task-creation instruction, marker, or compaction block. Even a compaction block does not prove that Codex will resume the model, invoke a `Stop` hook, or open a task. The earlier `PreToolUse` feedback is the normal route to an active handoff; if only the final compaction block occurs, report that blocked state and use the saved checkpoint for recovery. Some tool paths bypass hooks, so retain the pre-action checks in this section.
 
@@ -285,9 +316,9 @@ A timeout is an unknown outcome. Retain the reservation and owner, inspect that 
 On handoff feedback, stop ordinary work and complete steps 3–5 above. Then use the current app's exposed versions of these operations; discover them rather than assuming another app exposes the same names:
 
 1. Call `mcp__codex_app__list_projects` before creating a project task. Select the actual project and preserve required artifact access. Follow an explicit request to keep the saved checkout; otherwise use the tool's Git/worktree rules and include current working state only through supported options. A worktree does not itself deliver untracked files.
-2. Reserve one candidate, then call `mcp__codex_app__create_thread` with the complete read-only bootstrap and an accessible durable checkpoint. Preserve the existing permitted environment, account and approvals; omit model overrides unless the user requested them. Use a projectless target only when appropriate for the actual mission. Prefer fresh creation; `mcp__codex_app__fork_thread` inherits completed history and omits the active unfinished turn, so it qualifies only with verified room and a complete checkpoint.
+2. Reserve one candidate, then call `mcp__codex_app__create_thread` with the complete read-only bootstrap, the full checkpoint, and every required artifact or verified accessible reference. A summary or orientation bundle may accompany this payload but never replace it. Preserve the existing permitted environment, account and approvals; omit model overrides unless the user requested them. Use a projectless target only when appropriate for the actual mission. Prefer fresh creation; `mcp__codex_app__fork_thread` inherits completed history and omits the active unfinished turn, so it qualifies only with verified room and a complete checkpoint.
 3. Creation is asynchronous. Use the returned real `threadId` and `hostId` with `mcp__codex_app__wait_threads`; a queued `clientThreadId` is not a usable thread identifier. Resolve pending setup through app status/listing, and reconcile ambiguous creation before retrying.
-4. Use `mcp__codex_app__read_thread` to inspect the actual acknowledgment. Use `mcp__codex_app__send_message_to_thread` for missing read-only startup checks or a corrected checkpoint. Wait with cursors and bounded output; do not poll unchanged history. Require independent identity/status, matching checkpoint, readable files, exact goal/budget, effective permissions and sufficient room as in step 7.
+4. Use `mcp__codex_app__read_thread` to inspect the actual acknowledgment. Use `mcp__codex_app__send_message_to_thread` for missing read-only startup checks or a corrected checkpoint. Wait with cursors and bounded output; do not poll unchanged history. Require independent identity/status, matching checkpoint version/digest, every required artifact ID, readable files, exact goal/budget, effective permissions and sufficient room as in step 7. Do not call the transfer lossless while any item is absent.
 5. Quiesce all predecessor writers and perform the guarded ownership transfer. Send the candidate its authorized continuation through `mcp__codex_app__send_message_to_thread` only after ownership is established; the successor must reread it before mission edits. Without a shared atomic coordinator, keep the candidate read-only until the explicit manual stop-and-takeover. Do not claim a completed automatic transfer merely because native creation worked.
 
 An immediate native-task probe can establish creation, accessible files and matching policy. It does not test a context-triggered handoff. Record that distinction even if a new task's measured input is smaller than the old task's: smaller input does not establish an unknown compaction boundary.

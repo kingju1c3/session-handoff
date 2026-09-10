@@ -482,13 +482,17 @@ export function evaluateCodexHook(input) {
   need(object(control) && control.schema === 1 && control.armed === true && safeSession(control.sessionId) &&
     text(control.cwd) && text(control.checkpointPath) && control.checkpointPath.length <= 2048 &&
     integer(control.handoffReserveTokens, 1) && integer(control.maxNextStepTokens) && integer(now, 1), 'invalid armed hook control');
+  if (Object.hasOwn(control, 'autoCreate')) need(typeof control.autoCreate === 'boolean', 'invalid automatic-dispatch control');
   if (event.session_id !== control.sessionId || event.cwd !== control.cwd || telemetry?.unrelated === true) return idle;
   if (telemetry?.rootIdentityVerified !== true || telemetry.sessionId !== control.sessionId) return {
     output: { systemMessage: 'Session Handoff could not verify the exact root transcript identity. No root handoff or compaction block was requested.' }, marker: null };
   if (Object.hasOwn(control, 'boundaryTokens')) need(integer(control.boundaryTokens, 1), 'invalid confirmed hook boundary');
   const instruction = 'Session Handoff is armed for this exact session. Stop expanding mission work. Refresh the complete checkpoint at ' +
-    JSON.stringify(control.checkpointPath) + '. Check ownership and any pending reservation first; never duplicate a pending candidate. When no candidate is reserved, use the supported native codex_app create_thread tool, seed it with the full checkpoint, verify readiness and exact goal/permissions, and transfer ownership before continuing. Use fork_thread only with verified context relief. Do not call private APIs or treat a created window as verified transfer.';
-  if (event.hook_event_name === 'PreCompact') return { output: hookFeedback(event, 'Compaction stopped before context loss. ' + instruction), marker: null };
+    JSON.stringify(control.checkpointPath) + '. Check ownership and any pending reservation first; never duplicate a pending candidate. Do not create a successor until the complete checkpoint was saved and read back, its required artifacts are bound and deliverable, and all omissions are explicit. When no candidate is reserved, use the supported native codex_app create_thread tool with the complete checkpoint and successor bootstrap, not a summary or preview alone. Verify its checkpoint version/digest, every required artifact, readiness and exact goal/permissions before ownership transfer. Use fork_thread only with verified context relief. Do not call private APIs or treat a created window as verified transfer.';
+  const dispatch = control.autoCreate === true
+    ? ' Automatic successor creation is authorized for this exact mission. After checkpoint readback and candidate reservation, make mcp__codex_app__create_thread the next supported operation; do not merely describe the handoff.'
+    : ' Automatic successor creation is not armed. Preserve the checkpoint and obtain explicit current authorization before creating a task.';
+  if (event.hook_event_name === 'PreCompact') return { output: hookFeedback(event, 'Compaction stopped before context loss. ' + instruction + dispatch), marker: null };
   const context = telemetry && !telemetry.error ? { sessionId: telemetry.sessionId, source: 'exact Codex transcript token_count',
     observedAt: telemetry.observedAt, usedTokens: telemetry.usedTokens, effectiveWindowTokens: telemetry.windowTokens,
     compactionBoundariesTokens: control.boundaryTokens === undefined ? [] : [control.boundaryTokens],
@@ -496,7 +500,7 @@ export function evaluateCodexHook(input) {
   const decision = contextDecision(context, { now, maxAgeMs: 60000 }, control.sessionId);
   if (decision.decision === 'continue') return idle;
   const message = (decision.decision === 'handoff' ? 'Measured context requires handoff before the next tool. ' :
-    'Actual context boundary or fresh telemetry is unavailable; request an early handoff. ') + instruction;
+    'Actual context boundary or fresh telemetry is unavailable; request an early handoff. ') + instruction + dispatch;
   const turn = safeSession(event.turn_id) ? event.turn_id : null;
   const already = turn !== null && marker?.schema === 1 && marker.sessionId === control.sessionId && marker.cwd === control.cwd && marker.lastNotifiedTurn === turn;
   if (already) return idle; // Permit checkpoint preparation after one denial, cooperatively.
