@@ -96,6 +96,14 @@ If usage, the boundary, or the next-action cost is missing, inconsistent or stal
 
 A pre-compaction warning is a last chance to use an already prepared checkpoint. It may not permit blocking or enough time for a fresh summary. No skill can guarantee timing on a host that silently compacts without exposing advance control; label that host's continuation as best effort, with a manual new-session path.
 
+### Two-turn automatic rotation policy
+
+When the user authorizes automatic continuation, start the complete checkpoint, candidate creation, and handoff **no later than two safe turns before a potential compaction**. "Two safe turns" means the host has current, exact-session telemetry showing room for two bounded ordinary turns plus the checkpoint, review, bootstrap, acknowledgment, and transfer reserve. Do not substitute message count, a model name, or a guessed context percentage for that evidence. If the boundary, turn-cost bound, or enforcement mechanism is unavailable or stale, treat the threshold as reached now: freeze the checkpoint and use the earliest authorized handoff path. This is automatic new instance/session creation and handoff two turns before compaction when the host exposes the required controls; otherwise it is an early, explicitly best-effort handoff rather than a timing guarantee.
+
+At that trigger, create each user-authorized destination concurrently as a **read-only candidate** from the same frozen checkpoint: Codex creates a fresh task on an approved new branch or isolated worktree; Claude creates a native fork; Grok creates a new instance; every other LLM uses its verified native fresh-session, fork, or instance control. Do not claim a destination exists, has received files, or can create a branch/fork/instance until the actual host operation reports it. A host without a documented, available, and authorized creation control receives the complete manual packet instead; never use an undocumented UI or API.
+
+Synchronized candidate creation does not create multiple writers. Preserve one owner and one pending-successor reservation per destination, keep all candidates read-only through bootstrap, and transfer ownership to exactly one verified candidate. Record every other candidate as standby or close it according to the user's authorization. A Codex branch name must come from an explicit user-approved naming policy; do not invent one merely to satisfy the rotation.
+
 ### Codex automatic setup: connect the trigger and task controls
 
 The lifecycle engine alone does not monitor Codex or open tasks. For an authorized automatic handoff, configure the bundled hook adapter and use the native task operations below. A hook decision, a registered command, and a created task are separate evidence.
@@ -297,7 +305,7 @@ Use at most three attempts, and at most one if near the handoff deadline. Count 
 
 Re-read current work and recompute available hashes after review. If checkpoint or source artifacts changed, refresh affected evidence before using the verdict.
 
-## 6. Reserve and start exactly one successor
+## 6. Reserve and start synchronized candidates; transfer to exactly one successor
 
 Choose a fresh session with the preserved project and artifacts. A native fork qualifies only if its inherited history and actual headroom leave room for bootstrap, the next work step and another handoff reserve. Forking a nearly full transcript does not itself solve context pressure. If fork relief is unknown, select a new session.
 
@@ -305,7 +313,7 @@ Use native app tools first. When authorized computer-use tools are available, in
 
 If the host exposes no suitable control, produce a complete manual handoff now: the checkpoint and the bootstrap below, ready to paste/upload into a new chat. Name the required user action once. Do not pretend to create or verify a session.
 
-Before an automated launch, atomically reserve one pending successor and a fresh nonce, within the cap. Save this state and confirm it persisted before invoking the host. Transfer the mission as structured tool input, supported attachment, or literal text, never through executable interpolation, URL query parameters or observable process arguments.
+Before an automated launch, atomically reserve one pending successor per user-authorized destination and a fresh nonce for each, within the cap. Save this state and confirm it persisted before invoking the hosts. At the two-turn threshold, launch the authorized candidates from the same frozen checkpoint without waiting for one host before beginning another; every candidate remains read-only until one passes the normal readiness checks and receives ownership. Transfer the mission as structured tool input, supported attachment, or literal text, never through executable interpolation, URL query parameters or observable process arguments.
 
 Preserve the user's environment, account boundary, effective approvals, model/settings and artifact access. A changed destination or trust policy needs existing or explicit authority. Do not answer user trust prompts or weaken permissions to make a launch work.
 

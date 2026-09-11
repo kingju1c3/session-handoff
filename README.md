@@ -80,6 +80,8 @@ The complete instructions work in **Claude**, **ChatGPT and Codex**, and **Gemin
 
 Every path retains the same safeguard: a new chat, uploaded file, or visible tab does not by itself prove that the successor read the checkpoint, can access its files, has enough room, or owns the work.
 
+When automatic continuation is authorized and the app exposes current context telemetry plus a native creation control, the skill starts the handoff no later than **two safe turns before potential compaction**. At that point it creates user-authorized read-only candidates from the same checkpoint: a new Codex task on an approved branch or worktree, a Claude fork, a Grok instance, and the corresponding fresh session, fork, or instance in any other supported LLM. Only one verified candidate becomes the writer; the others remain standby. Hidden or stale telemetry triggers an early best-effort handoff now—not a claim that the app can predict compaction. Codex branch creation still requires an explicit user-approved branch naming policy.
+
 ## Quickstart
 
 1. Open the [instructions file](https://raw.githubusercontent.com/kingju1c3/session-handoff/main/SKILL.md)
@@ -121,7 +123,8 @@ The option may depend on your account or organization. For a different app, foll
 skill-installation guide. If installation is unavailable, use the Quickstart above.
 
 **Automatic moves need a connection to the app.** Installing instructions alone does not make
-that connection. The Codex setup adds checks before tool use and before a chat is shortened.
+that connection. The Codex setup adds checks before tool use and before a chat is shortened,
+including the two-safe-turn threshold when exact telemetry is available.
 Codex requires you to review new checks before they can run; the AI cannot approve them for you.
 See [Codex's guide](https://developers.openai.com/codex/hooks). If those checks cannot run, the AI
 can still open a task now when the app allows it, but cannot promise a later automatic move.
